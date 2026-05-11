@@ -1,0 +1,1003 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#1e293b">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="记账本">
+  <link rel="manifest" href="manifest.json">
+  <title>我的记账本</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            primary: { 50:'#eff6ff',100:'#dbeafe',200:'#bfdbfe',300:'#93c5fd',400:'#60a5fa',500:'#3b82f6',600:'#2563eb',700:'#1d4ed8' }
+          }
+        }
+      }
+    }
+  </script>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://unpkg.com/dexie@3/dist/dexie.js"></script>
+  <style>
+    * { -webkit-tap-highlight-color: transparent; }
+    body { overscroll-behavior: none; }
+    .tab-bar { padding-bottom: env(safe-area-inset-bottom, 8px); }
+    .fade-enter-active, .fade-leave-active { transition: opacity 0.2s ease; }
+    .fade-enter-from, .fade-leave-to { opacity: 0; }
+    .slide-enter-active, .slide-leave-active { transition: transform 0.3s ease, opacity 0.3s ease; }
+    .slide-enter-from { transform: translateX(20px); opacity: 0; }
+    .slide-leave-to { transform: translateX(-20px); opacity: 0; }
+    input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.5); }
+    .dark input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.8); }
+    @keyframes pulse-dot { 0%,100%{opacity:1} 50%{opacity:0.4} }
+    .typing-dot { animation: pulse-dot 1.4s infinite; }
+    .typing-dot:nth-child(2) { animation-delay: 0.2s; }
+    .typing-dot:nth-child(3) { animation-delay: 0.4s; }
+  </style>
+</head>
+<body class="bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 min-h-screen transition-colors">
+
+<div id="app" class="max-w-lg mx-auto min-h-screen flex flex-col relative">
+
+  <!-- Header -->
+  <header class="sticky top-0 z-30 bg-white/90 dark:bg-gray-800/90 backdrop-blur border-b border-gray-200 dark:border-gray-700 px-4 py-3 flex items-center justify-between">
+    <h1 class="text-lg font-bold tracking-tight">
+      <span v-if="currentTab==='dashboard'">📊 收支总览</span>
+      <span v-else-if="currentTab==='add'">✏️ 记一笔</span>
+      <span v-else-if="currentTab==='list'">📋 账单明细</span>
+      <span v-else-if="currentTab==='ai'">🤖 AI 助手</span>
+      <span v-else>⚙️ 设置</span>
+    </h1>
+    <button @click="toggleTheme" class="w-9 h-9 rounded-full flex items-center justify-center bg-gray-100 dark:bg-gray-700 text-lg">
+      {{ theme === 'dark' ? '☀️' : '🌙' }}
+    </button>
+  </header>
+
+  <!-- Main Content -->
+  <main class="flex-1 overflow-y-auto px-4 py-4 pb-24">
+
+    <!-- ==================== DASHBOARD ==================== -->
+    <div v-show="currentTab==='dashboard'" class="space-y-4">
+
+      <!-- Month Selector -->
+      <div class="flex items-center justify-between">
+        <button @click="prevMonth" class="w-8 h-8 rounded-full flex items-center justify-center bg-gray-100 dark:bg-gray-700 text-sm">◀</button>
+        <span class="font-semibold text-sm">{{ dashboardMonth }}</span>
+        <button @click="nextMonth" class="w-8 h-8 rounded-full flex items-center justify-center bg-gray-100 dark:bg-gray-700 text-sm">▶</button>
+      </div>
+
+      <!-- Summary Cards -->
+      <div class="grid grid-cols-3 gap-3">
+        <div class="bg-white dark:bg-gray-800 rounded-xl p-3 shadow-sm text-center">
+          <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">支出</p>
+          <p class="text-lg font-bold text-red-500">¥{{ fmt(dashboardSummary.expense) }}</p>
+        </div>
+        <div class="bg-white dark:bg-gray-800 rounded-xl p-3 shadow-sm text-center">
+          <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">收入</p>
+          <p class="text-lg font-bold text-green-500">¥{{ fmt(dashboardSummary.income) }}</p>
+        </div>
+        <div class="bg-white dark:bg-gray-800 rounded-xl p-3 shadow-sm text-center">
+          <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">结余</p>
+          <p class="text-lg font-bold" :class="dashboardSummary.balance>=0?'text-blue-500':'text-red-500'">¥{{ fmt(dashboardSummary.balance) }}</p>
+        </div>
+      </div>
+
+      <!-- Pie Chart -->
+      <div class="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm">
+        <h3 class="text-sm font-semibold mb-3">支出分类占比</h3>
+        <div class="h-52 relative">
+          <canvas id="pieChart" v-show="dashboardSummary.expense>0"></canvas>
+          <p v-if="dashboardSummary.expense===0" class="absolute inset-0 flex items-center justify-center text-gray-400 text-sm">本月暂无支出</p>
+        </div>
+      </div>
+
+      <!-- Line Chart -->
+      <div class="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm">
+        <h3 class="text-sm font-semibold mb-3">近6月趋势</h3>
+        <div class="h-52 relative">
+          <canvas id="lineChart" v-show="trendLabels.length>0"></canvas>
+          <p v-if="trendLabels.length===0" class="absolute inset-0 flex items-center justify-center text-gray-400 text-sm">暂无数据</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== ADD TRANSACTION ==================== -->
+    <div v-show="currentTab==='add'" class="space-y-4">
+      <!-- AI Quick Input -->
+      <div class="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm">
+        <label class="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2 block">🤖 AI 智能记账（输入一句话自动识别）</label>
+        <div class="flex gap-2">
+          <input v-model="aiInput" @keyup.enter="aiParse" type="text" placeholder="例如：今天午饭花了35元"
+            class="flex-1 px-3 py-2 text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
+          <button @click="aiParse" :disabled="aiLoading" class="px-4 py-2 bg-blue-500 text-white text-sm rounded-lg font-medium hover:bg-blue-600 disabled:opacity-50">
+            {{ aiLoading ? '识别中...' : '识别' }}
+          </button>
+        </div>
+        <p v-if="aiError" class="text-red-400 text-xs mt-2">{{ aiError }}</p>
+      </div>
+
+      <!-- Manual Form -->
+      <div class="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm space-y-4">
+        <h3 class="text-sm font-semibold">📝 手动记账</h3>
+
+        <!-- Type Toggle -->
+        <div class="flex rounded-lg bg-gray-100 dark:bg-gray-700 p-1">
+          <button @click="form.type='expense'" :class="form.type==='expense'?'bg-white dark:bg-gray-600 shadow-sm text-red-500':'text-gray-500'"
+            class="flex-1 py-2 text-sm font-medium rounded-md transition-all">支出</button>
+          <button @click="form.type='income'" :class="form.type==='income'?'bg-white dark:bg-gray-600 shadow-sm text-green-500':'text-gray-500'"
+            class="flex-1 py-2 text-sm font-medium rounded-md transition-all">收入</button>
+        </div>
+
+        <!-- Amount -->
+        <div>
+          <label class="text-xs text-gray-500 dark:text-gray-400 mb-1 block">金额</label>
+          <input v-model.number="form.amount" type="number" step="0.01" min="0" placeholder="0.00"
+            class="w-full px-3 py-2 text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
+        </div>
+
+        <!-- Category -->
+        <div>
+          <label class="text-xs text-gray-500 dark:text-gray-400 mb-1 block">分类</label>
+          <div class="grid grid-cols-4 gap-2">
+            <button v-for="cat in currentCategories" :key="cat.value"
+              @click="form.category=cat.value"
+              :class="form.category===cat.value?'ring-2 ring-blue-500 bg-blue-50 dark:bg-blue-900/30':'bg-gray-50 dark:bg-gray-700'"
+              class="py-2 rounded-lg text-xs text-center transition-all">
+              <span class="block text-lg">{{ cat.icon }}</span>
+              {{ cat.label }}
+            </button>
+          </div>
+        </div>
+
+        <!-- Date -->
+        <div>
+          <label class="text-xs text-gray-500 dark:text-gray-400 mb-1 block">日期</label>
+          <input v-model="form.date" type="date"
+            class="w-full px-3 py-2 text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
+        </div>
+
+        <!-- Note -->
+        <div>
+          <label class="text-xs text-gray-500 dark:text-gray-400 mb-1 block">备注</label>
+          <input v-model="form.note" type="text" placeholder="写点什么..."
+            class="w-full px-3 py-2 text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
+        </div>
+
+        <!-- Tags -->
+        <div>
+          <label class="text-xs text-gray-500 dark:text-gray-400 mb-1 block">标签（逗号分隔）</label>
+          <input v-model="form.tags" type="text" placeholder="例如：外卖,周末"
+            class="w-full px-3 py-2 text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
+        </div>
+
+        <!-- Submit -->
+        <button @click="saveTransaction"
+          class="w-full py-3 rounded-xl text-white font-semibold text-sm transition-all"
+          :class="editingId ? 'bg-orange-500 hover:bg-orange-600' : 'bg-blue-500 hover:bg-blue-600'">
+          {{ editingId ? '💾 更新账单' : '✔️ 添加账单' }}
+        </button>
+        <button v-if="editingId" @click="cancelEdit" class="w-full py-2 text-sm text-gray-500">取消编辑</button>
+      </div>
+    </div>
+
+    <!-- ==================== TRANSACTION LIST ==================== -->
+    <div v-show="currentTab==='list'" class="space-y-4">
+      <!-- Search & Filter -->
+      <div class="bg-white dark:bg-gray-800 rounded-xl p-3 shadow-sm space-y-2">
+        <input v-model="searchQuery" @input="loadTransactions" type="text" placeholder="🔍 搜索备注、标签..."
+          class="w-full px-3 py-2 text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
+        <div class="flex gap-2">
+          <input v-model="filterDateFrom" type="date" @change="loadTransactions"
+            class="flex-1 px-2 py-1.5 text-xs rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 focus:outline-none">
+          <span class="text-gray-400 self-center text-xs">至</span>
+          <input v-model="filterDateTo" type="date" @change="loadTransactions"
+            class="flex-1 px-2 py-1.5 text-xs rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 focus:outline-none">
+          <button @click="filterDateFrom='';filterDateTo='';loadTransactions()" class="px-3 py-1.5 text-xs text-gray-500 bg-gray-100 dark:bg-gray-700 rounded-lg">清除</button>
+        </div>
+      </div>
+
+      <!-- Grouped Transactions -->
+      <div v-for="group in groupedTransactions" :key="group.month" class="space-y-2">
+        <div class="flex items-center justify-between px-1">
+          <h3 class="text-sm font-semibold text-gray-500 dark:text-gray-400">{{ group.month }}</h3>
+          <span class="text-xs text-gray-400">
+            支 ¥{{ fmt(group.totalExpense) }} 收 ¥{{ fmt(group.totalIncome) }}
+          </span>
+        </div>
+        <div v-for="t in group.items" :key="t.id"
+          class="bg-white dark:bg-gray-800 rounded-xl p-3 shadow-sm flex items-center gap-3 group relative overflow-hidden">
+          <!-- Swipe actions -->
+          <div class="absolute right-0 top-0 bottom-0 flex transition-transform"
+            :style="{transform: swipeId===t.id ? 'translateX(0)' : 'translateX(100%)'}">
+            <button @click="editTransaction(t)" class="w-16 bg-orange-500 text-white text-xs font-semibold h-full">编辑</button>
+            <button @click="deleteTransaction(t.id)" class="w-16 bg-red-500 text-white text-xs font-semibold h-full">删除</button>
+          </div>
+          <span class="text-2xl">{{ catIcon(t.category, t.type) }}</span>
+          <div class="flex-1 min-w-0" @touchstart="touchStart($event,t)" @touchend="touchEnd($event,t)"
+            @click="swipeId ? (swipeId=null) : null">
+            <div class="flex items-center justify-between">
+              <span class="text-sm font-medium truncate">{{ t.note || catLabel(t.category, t.type) }}</span>
+              <span :class="t.type==='expense'?'text-red-500':'text-green-500'" class="font-semibold text-sm">
+                {{ t.type==='expense'?'-':'+' }}¥{{ fmt(t.amount) }}
+              </span>
+            </div>
+            <div class="flex items-center justify-between mt-0.5">
+              <span class="text-xs text-gray-400">{{ catLabel(t.category, t.type) }}</span>
+              <span class="text-xs text-gray-400">{{ t.date.slice(5) }}</span>
+            </div>
+            <div v-if="t.tags" class="flex gap-1 mt-1 flex-wrap">
+              <span v-for="tag in t.tags.split(',').filter(Boolean)" :key="tag"
+                class="text-xs bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 px-1.5 py-0.5 rounded-full">{{ tag.trim() }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p v-if="groupedTransactions.length===0" class="text-center text-gray-400 text-sm py-12">暂无账单记录</p>
+    </div>
+
+    <!-- ==================== AI ASSISTANT ==================== -->
+    <div v-show="currentTab==='ai'" class="space-y-4">
+      <!-- Chat Messages -->
+      <div ref="aiChatBox" class="space-y-3 min-h-[300px] max-h-[500px] overflow-y-auto">
+        <div v-for="(msg, i) in aiMessages" :key="i" class="flex" :class="msg.role==='user'?'justify-end':'justify-start'">
+          <div :class="msg.role==='user'
+            ? 'bg-blue-500 text-white rounded-xl rounded-br-sm max-w-[85%]'
+            : 'bg-white dark:bg-gray-800 rounded-xl rounded-bl-sm max-w-[85%] shadow-sm'"
+            class="px-3 py-2 text-sm">
+            <div v-html="msg.content"></div>
+            <button v-if="msg.transaction" @click="addAiTransaction(msg.transaction)"
+              class="mt-2 px-3 py-1.5 bg-green-500 text-white text-xs rounded-lg font-medium hover:bg-green-600">
+              ➕ 一键添加此记录
+            </button>
+            <button v-if="msg.reportType" @click="generateReport(msg.reportType)"
+              class="mt-2 px-3 py-1.5 bg-blue-500 text-white text-xs rounded-lg font-medium hover:bg-blue-600">
+              🔄 重新生成
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Report Buttons -->
+      <div class="flex gap-2">
+        <button @click="generateReport('week')" :disabled="aiLoading"
+          class="flex-1 py-2.5 bg-white dark:bg-gray-800 rounded-xl shadow-sm text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-750 disabled:opacity-50">
+          📅 生成周报
+        </button>
+        <button @click="generateReport('month')" :disabled="aiLoading"
+          class="flex-1 py-2.5 bg-white dark:bg-gray-800 rounded-xl shadow-sm text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-750 disabled:opacity-50">
+          📊 生成月报
+        </button>
+      </div>
+
+      <!-- AI Input -->
+      <div class="flex gap-2">
+        <input v-model="aiChatInput" @keyup.enter="sendAiMessage" type="text"
+          placeholder="输入消费描述或提问..."
+          class="flex-1 px-3 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500">
+        <button @click="sendAiMessage" :disabled="aiLoading"
+          class="px-4 py-2.5 bg-blue-500 text-white rounded-xl font-medium text-sm hover:bg-blue-600 disabled:opacity-50">
+          {{ aiLoading ? '...' : '发送' }}
+        </button>
+      </div>
+    </div>
+
+    <!-- ==================== SETTINGS ==================== -->
+    <div v-show="currentTab==='settings'" class="space-y-4">
+      <!-- API Key -->
+      <div class="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm space-y-3">
+        <h3 class="text-sm font-semibold">🔑 DeepSeek API 密钥</h3>
+        <input :type="showKey?'text':'password'" v-model="apiKey" placeholder="sk-xxx..."
+          class="w-full px-3 py-2 text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
+        <div class="flex gap-2">
+          <button @click="showKey=!showKey" class="text-xs text-gray-500">{{ showKey?'隐藏':'显示' }}</button>
+          <button @click="saveApiKey" class="text-xs text-blue-500 font-medium">保存密钥</button>
+          <a href="https://platform.deepseek.com/api_keys" target="_blank" class="text-xs text-blue-400 underline ml-auto">获取密钥 →</a>
+        </div>
+        <p class="text-xs text-gray-400">密钥仅保存在浏览器本地，不上传任何服务器</p>
+      </div>
+
+      <!-- Theme -->
+      <div class="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm">
+        <div class="flex items-center justify-between">
+          <span class="text-sm font-semibold">🎨 主题模式</span>
+          <button @click="toggleTheme" class="px-4 py-2 rounded-lg text-sm font-medium"
+            :class="theme==='dark'?'bg-gray-700 text-white':'bg-gray-100 text-gray-700'">
+            {{ theme==='dark'?'🌙 暗黑':'☀️ 浅色' }}
+          </button>
+        </div>
+      </div>
+
+      <!-- Backup -->
+      <div class="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm space-y-3">
+        <h3 class="text-sm font-semibold">💾 数据备份</h3>
+        <button @click="exportData" class="w-full py-2.5 bg-blue-500 text-white rounded-xl text-sm font-medium hover:bg-blue-600">
+          📤 一键备份（导出JSON文件）
+        </button>
+        <div>
+          <input ref="importFile" type="file" accept=".json" @change="importData" class="hidden">
+          <button @click="$refs.importFile.click()" class="w-full py-2.5 bg-green-500 text-white rounded-xl text-sm font-medium hover:bg-green-600">
+            📥 一键恢复（选择备份文件）
+          </button>
+        </div>
+        <p v-if="restoreMsg" class="text-xs" :class="restoreSuccess?'text-green-500':'text-red-500'">{{ restoreMsg }}</p>
+        <p class="text-xs text-gray-400">备份文件名：记账备份_YYYYMMDD.json</p>
+      </div>
+
+      <!-- Baidu Netdisk Guide -->
+      <div class="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm space-y-3">
+        <h3 class="text-sm font-semibold">☁️ 百度网盘备份教程</h3>
+        <div class="space-y-2 text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
+          <div class="flex gap-2">
+            <span class="w-5 h-5 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-600 text-xs flex items-center justify-center shrink-0 mt-0.5">1</span>
+            <span>点击上方 <b>一键备份</b>，下载 <b>记账备份_日期.json</b> 文件到手机</span>
+          </div>
+          <div class="flex gap-2">
+            <span class="w-5 h-5 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-600 text-xs flex items-center justify-center shrink-0 mt-0.5">2</span>
+            <span>打开<b>百度网盘 App</b>，上传该 JSON 文件到任意文件夹保存</span>
+          </div>
+          <div class="flex gap-2">
+            <span class="w-5 h-5 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-600 text-xs flex items-center justify-center shrink-0 mt-0.5">3</span>
+            <span>换新手机时，从百度网盘下载该文件，点击上方 <b>一键恢复</b> 选择文件即可</span>
+          </div>
+          <div class="flex gap-2">
+            <span class="w-5 h-5 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-600 text-xs flex items-center justify-center shrink-0 mt-0.5">💡</span>
+            <span>建议<b>每周备份一次</b>，标好日期，遇到问题随时恢复</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- About -->
+      <div class="text-center text-xs text-gray-400 py-4">
+        <p>我的记账本 v1.0 · 数据仅存储在本地</p>
+        <p>离线可用 · 隐私安全</p>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- Bottom Tab Bar -->
+  <nav class="tab-bar fixed bottom-0 left-0 right-0 max-w-lg mx-auto bg-white/90 dark:bg-gray-800/90 backdrop-blur border-t border-gray-200 dark:border-gray-700 flex z-40">
+    <button v-for="tab in tabs" :key="tab.key" @click="currentTab=tab.key"
+      class="flex-1 py-2 flex flex-col items-center justify-center gap-0.5 transition-colors"
+      :class="currentTab===tab.key?'text-blue-500':'text-gray-400'">
+      <span class="text-xl">{{ tab.icon }}</span>
+      <span class="text-xs">{{ tab.label }}</span>
+    </button>
+  </nav>
+
+</div>
+
+<script>
+const { createApp } = Vue;
+
+// ==================== CONSTANTS ====================
+const EXPENSE_CATS = [
+  { value:'餐饮', label:'餐饮', icon:'🍔' },
+  { value:'购物', label:'购物', icon:'🛍️' },
+  { value:'交通', label:'交通', icon:'🚗' },
+  { value:'居住', label:'居住', icon:'🏠' },
+  { value:'娱乐', label:'娱乐', icon:'🎮' },
+  { value:'医疗', label:'医疗', icon:'💊' },
+  { value:'其他', label:'其他', icon:'📦' },
+];
+const INCOME_CATS = [
+  { value:'工资', label:'工资', icon:'💼' },
+  { value:'奖金', label:'奖金', icon:'🎁' },
+  { value:'兼职', label:'兼职', icon:'💻' },
+  { value:'投资', label:'投资', icon:'📈' },
+  { value:'其他', label:'其他', icon:'💰' },
+];
+const ALL_CATS = [...EXPENSE_CATS, ...INCOME_CATS];
+
+function catIcon(cat, type) {
+  const cats = type === 'expense' ? EXPENSE_CATS : INCOME_CATS;
+  return cats.find(c => c.value === cat)?.icon || '📌';
+}
+function catLabel(cat, type) {
+  const cats = type === 'expense' ? EXPENSE_CATS : INCOME_CATS;
+  return cats.find(c => c.value === cat)?.label || cat;
+}
+
+// ==================== DATABASE ====================
+const db = new Dexie('MoneyBookDB');
+db.version(1).stores({
+  transactions: '++id, type, category, date, amount, note, tags, createdAt'
+});
+
+// ==================== VUE APP ====================
+const app = createApp({
+  data() {
+    const now = new Date();
+    const today = now.toISOString().slice(0,10);
+    return {
+      currentTab: 'dashboard',
+      theme: localStorage.getItem('theme') || 'light',
+      // Dashboard
+      dashboardMonth: `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`,
+      dashboardSummary: { expense:0, income:0, balance:0 },
+      dashboardCatData: {},
+      trendLabels: [],
+      trendExpenses: [],
+      trendIncomes: [],
+      pieChart: null,
+      lineChart: null,
+      // Add form
+      form: { type:'expense', amount:null, category:'餐饮', date:today, note:'', tags:'' },
+      editingId: null,
+      aiInput: '',
+      aiLoading: false,
+      aiError: '',
+      // List
+      transactions: [],
+      searchQuery: '',
+      filterDateFrom: '',
+      filterDateTo: '',
+      swipeId: null,
+      touchStartX: 0,
+      // AI
+      apiKey: localStorage.getItem('deepseek_api_key') || '',
+      showKey: false,
+      aiMessages: [],
+      aiChatInput: '',
+      // Settings
+      restoreMsg: '',
+      restoreSuccess: false,
+      // Tabs
+      tabs: [
+        { key:'dashboard', label:'首页', icon:'📊' },
+        { key:'add', label:'记账', icon:'✏️' },
+        { key:'list', label:'账单', icon:'📋' },
+        { key:'ai', label:'AI', icon:'🤖' },
+        { key:'settings', label:'我的', icon:'⚙️' },
+      ],
+    }
+  },
+
+  computed: {
+    currentCategories() {
+      return this.form.type === 'expense' ? EXPENSE_CATS : INCOME_CATS;
+    },
+    groupedTransactions() {
+      const groups = {};
+      for (const t of this.transactions) {
+        const month = t.date.slice(0,7);
+        if (!groups[month]) groups[month] = { month, items:[], totalExpense:0, totalIncome:0 };
+        groups[month].items.push(t);
+        if (t.type === 'expense') groups[month].totalExpense += t.amount;
+        else groups[month].totalIncome += t.amount;
+      }
+      return Object.values(groups).sort((a,b) => b.month.localeCompare(a.month));
+    }
+  },
+
+  watch: {
+    currentTab(v) {
+      if (v === 'dashboard') { this.loadDashboard(); }
+      if (v === 'list') { this.loadTransactions(); }
+      if (v === 'ai') { this.$nextTick(() => this.scrollAiChat()); }
+    },
+    theme(v) {
+      document.documentElement.classList.toggle('dark', v === 'dark');
+      localStorage.setItem('theme', v);
+      this.$nextTick(() => {
+        if (this.currentTab === 'dashboard') this.loadCharts();
+      });
+    },
+    'form.type'(v) {
+      if (!this.editingId) {
+        this.form.category = v === 'expense' ? '餐饮' : '工资';
+      }
+    }
+  },
+
+  methods: {
+    fmt(n) { return (n||0).toFixed(2); },
+
+    // ==================== THEME ====================
+    toggleTheme() {
+      this.theme = this.theme === 'dark' ? 'light' : 'dark';
+    },
+
+    // ==================== DASHBOARD ====================
+    prevMonth() {
+      const [y,m] = this.dashboardMonth.split('-').map(Number);
+      const d = new Date(y, m-2, 1);
+      this.dashboardMonth = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+      this.loadDashboard();
+    },
+    nextMonth() {
+      const [y,m] = this.dashboardMonth.split('-').map(Number);
+      const d = new Date(y, m, 1);
+      this.dashboardMonth = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+      this.loadDashboard();
+    },
+
+    async loadDashboard() {
+      const prefix = this.dashboardMonth;
+      const all = await db.transactions.where('date').startsWith(prefix).toArray();
+
+      let expense = 0, income = 0;
+      const catMap = {};
+      for (const t of all) {
+        if (t.type === 'expense') {
+          expense += t.amount;
+          catMap[t.category] = (catMap[t.category]||0) + t.amount;
+        } else {
+          income += t.amount;
+        }
+      }
+      this.dashboardSummary = { expense, income, balance: income - expense };
+      this.dashboardCatData = catMap;
+
+      // Trend (last 6 months)
+      const labels = [];
+      const expenses = [];
+      const incomes = [];
+      for (let i = 5; i >= 0; i--) {
+        const d = new Date();
+        d.setMonth(d.getMonth() - i);
+        const m = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+        labels.push(m.slice(2));
+        const recs = await db.transactions.where('date').startsWith(m).toArray();
+        expenses.push(recs.filter(r=>r.type==='expense').reduce((s,r)=>s+r.amount,0));
+        incomes.push(recs.filter(r=>r.type==='income').reduce((s,r)=>s+r.amount,0));
+      }
+      this.trendLabels = labels;
+      this.trendExpenses = expenses;
+      this.trendIncomes = incomes;
+
+      this.$nextTick(() => this.loadCharts());
+    },
+
+    loadCharts() {
+      // Destroy old charts
+      if (this.pieChart) { this.pieChart.destroy(); this.pieChart = null; }
+      if (this.lineChart) { this.lineChart.destroy(); this.lineChart = null; }
+
+      const isDark = this.theme === 'dark';
+      const textColor = isDark ? '#9ca3af' : '#6b7280';
+
+      // Pie chart
+      const pieCanvas = document.getElementById('pieChart');
+      if (pieCanvas && this.dashboardSummary.expense > 0) {
+        const catMap = this.dashboardCatData;
+        const colors = ['#f87171','#fb923c','#facc15','#4ade80','#60a5fa','#a78bfa','#f472b6'];
+        this.pieChart = new Chart(pieCanvas, {
+          type: 'doughnut',
+          data: {
+            labels: Object.keys(catMap),
+            datasets: [{
+              data: Object.values(catMap),
+              backgroundColor: colors.slice(0, Object.keys(catMap).length),
+              borderColor: isDark ? '#1f2937' : '#ffffff',
+              borderWidth: 2,
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: {
+                position: 'bottom',
+                labels: { color: textColor, padding: 16, font: { size: 11 }, usePointStyle: true, pointStyleWidth: 8 }
+              }
+            }
+          }
+        });
+      }
+
+      // Line chart
+      const lineCanvas = document.getElementById('lineChart');
+      if (lineCanvas && this.trendLabels.length > 0) {
+        this.lineChart = new Chart(lineCanvas, {
+          type: 'line',
+          data: {
+            labels: this.trendLabels,
+            datasets: [
+              {
+                label: '支出',
+                data: this.trendExpenses,
+                borderColor: '#f87171',
+                backgroundColor: 'rgba(248,113,113,0.1)',
+                fill: true,
+                tension: 0.4,
+                pointRadius: 4,
+                pointBackgroundColor: '#f87171',
+              },
+              {
+                label: '收入',
+                data: this.trendIncomes,
+                borderColor: '#4ade80',
+                backgroundColor: 'rgba(74,222,128,0.1)',
+                fill: true,
+                tension: 0.4,
+                pointRadius: 4,
+                pointBackgroundColor: '#4ade80',
+              }
+            ]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: {
+                position: 'bottom',
+                labels: { color: textColor, padding: 16, font: { size: 11 }, usePointStyle: true }
+              }
+            },
+            scales: {
+              x: { ticks: { color: textColor, font: { size: 10 } }, grid: { display: false } },
+              y: { ticks: { color: textColor, font: { size: 10 }, callback: v => '¥'+v }, grid: { color: isDark?'rgba(255,255,255,0.05)':'rgba(0,0,0,0.05)' } }
+            }
+          }
+        });
+      }
+    },
+
+    // ==================== ADD ====================
+    async saveTransaction() {
+      if (!this.form.amount || this.form.amount <= 0) {
+        alert('请输入有效金额'); return;
+      }
+      const data = {
+        type: this.form.type,
+        amount: this.form.amount,
+        category: this.form.category,
+        date: this.form.date,
+        note: this.form.note || catLabel(this.form.category, this.form.type),
+        tags: this.form.tags,
+        createdAt: new Date()
+      };
+
+      if (this.editingId) {
+        await db.transactions.update(this.editingId, data);
+        this.editingId = null;
+      } else {
+        await db.transactions.add(data);
+      }
+
+      this.form.amount = null;
+      this.form.note = '';
+      this.form.tags = '';
+      this.form.category = this.form.type === 'expense' ? '餐饮' : '工资';
+      this.editingId = null;
+      this.loadDashboard();
+    },
+
+    editTransaction(t) {
+      this.form.type = t.type;
+      this.form.amount = t.amount;
+      this.form.category = t.category;
+      this.form.date = t.date;
+      this.form.note = t.note;
+      this.form.tags = t.tags || '';
+      this.editingId = t.id;
+      this.currentTab = 'add';
+      this.swipeId = null;
+    },
+
+    cancelEdit() {
+      this.editingId = null;
+      this.form.amount = null;
+      this.form.note = '';
+      this.form.tags = '';
+      this.form.category = '餐饮';
+    },
+
+    // ==================== AI PARSE ====================
+    async aiParse() {
+      if (!this.aiInput.trim()) return;
+      if (!this.apiKey) { this.aiError = '请先在"设置"中配置 DeepSeek API 密钥'; return; }
+      this.aiLoading = true; this.aiError = '';
+
+      try {
+        const res = await fetch('https://api.deepseek.com/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Content-Type':'application/json', 'Authorization':`Bearer ${this.apiKey}` },
+          body: JSON.stringify({
+            model: 'deepseek-chat',
+            messages: [
+              { role:'system', content:'你是一个记账助手。从用户输入中提取：金额、类型(expense/income)、分类、备注、日期。\n分类选项 - 支出：餐饮、购物、交通、居住、娱乐、医疗、其他；收入：工资、奖金、兼职、投资、其他。\n返回纯JSON，不要包含markdown格式：{"amount":数字,"type":"expense或income","category":"分类","note":"备注","date":"YYYY-MM-DD"}\n如果无法识别，返回{"error":"无法识别"}' },
+              { role:'user', content: this.aiInput }
+            ],
+            temperature: 0.1,
+            max_tokens: 200
+          })
+        });
+        const data = await res.json();
+        const content = data.choices?.[0]?.message?.content || '';
+        const json = JSON.parse(content.replace(/```json|```/g, '').trim());
+
+        if (json.error) { this.aiError = json.error; return; }
+
+        this.form.type = json.type || 'expense';
+        this.form.amount = json.amount || 0;
+        this.form.category = json.category || (json.type==='expense'?'餐饮':'工资');
+        this.form.note = json.note || '';
+        this.form.date = json.date || new Date().toISOString().slice(0,10);
+        this.form.tags = '';
+
+        if (json.date && json.date !== this.form.date) {
+          // date parsed by AI, keep it
+        }
+      } catch (e) {
+        this.aiError = '识别失败：' + (e.message || '请检查网络和API密钥');
+      } finally {
+        this.aiLoading = false;
+      }
+    },
+
+    // ==================== LIST ====================
+    async loadTransactions() {
+      let collection = db.transactions.orderBy('date').reverse();
+
+      if (this.filterDateFrom && this.filterDateTo) {
+        collection = collection.filter(t => t.date >= this.filterDateFrom && t.date <= this.filterDateTo);
+      } else if (this.filterDateFrom) {
+        collection = collection.filter(t => t.date >= this.filterDateFrom);
+      } else if (this.filterDateTo) {
+        collection = collection.filter(t => t.date <= this.filterDateTo);
+      }
+
+      let results = await collection.toArray();
+
+      if (this.searchQuery.trim()) {
+        const q = this.searchQuery.trim().toLowerCase();
+        results = results.filter(t =>
+          (t.note||'').toLowerCase().includes(q) ||
+          (t.tags||'').toLowerCase().includes(q) ||
+          (t.category||'').toLowerCase().includes(q)
+        );
+      }
+
+      this.transactions = results;
+    },
+
+    async deleteTransaction(id) {
+      if (!confirm('确定删除这条记录吗？')) return;
+      await db.transactions.delete(id);
+      this.swipeId = null;
+      this.loadTransactions();
+      this.loadDashboard();
+    },
+
+    touchStart(e, t) {
+      this.touchStartX = e.touches[0].clientX;
+    },
+    touchEnd(e, t) {
+      const dx = this.touchStartX - e.changedTouches[0].clientX;
+      if (dx > 60) this.swipeId = t.id;
+      else if (dx < -30) this.swipeId = null;
+    },
+
+    // ==================== AI ASSISTANT ====================
+    async sendAiMessage() {
+      const text = this.aiChatInput.trim();
+      if (!text) return;
+      if (!this.apiKey) {
+        this.aiMessages.push({ role:'assistant', content:'请先在<b>设置</b>中配置 DeepSeek API 密钥。' });
+        return;
+      }
+      this.aiMessages.push({ role:'user', content: text });
+      this.aiChatInput = '';
+      this.aiLoading = true;
+      this.$nextTick(() => this.scrollAiChat());
+
+      try {
+        const res = await fetch('https://api.deepseek.com/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Content-Type':'application/json', 'Authorization':`Bearer ${this.apiKey}` },
+          body: JSON.stringify({
+            model: 'deepseek-chat',
+            messages: [
+              { role:'system', content:'你是一个智能记账助手。当用户输入消费描述时，提取结构化数据并返回JSON：{"amount":数字,"type":"expense或income","category":"分类","note":"备注","date":"YYYY-MM-DD"}。当用户问其他问题时，用中文友好回答。返回纯文本或JSON，不要markdown代码块。' },
+              ...this.aiMessages.filter(m=>!m.transaction).map(m=>({ role:m.role, content: m.content.replace(/<[^>]+>/g,'') }))
+            ],
+            temperature: 0.7,
+            max_tokens: 600
+          })
+        });
+        const data = await res.json();
+        const content = data.choices?.[0]?.message?.content || '';
+
+        // Try to parse as JSON (transaction)
+        try {
+          const json = JSON.parse(content.replace(/```json|```/g, '').trim());
+          if (json.amount) {
+            this.aiMessages.push({
+              role:'assistant',
+              content: `📝 识别到记账记录：<br>类型：<b>${json.type==='expense'?'支出':'收入'}</b> | 金额：<b>¥${json.amount}</b> | 分类：<b>${json.category}</b> | 日期：<b>${json.date||'今天'}</b><br>备注：${json.note||'无'}`,
+              transaction: json
+            });
+          }
+        } catch {
+          this.aiMessages.push({ role:'assistant', content: content.replace(/\n/g, '<br>') });
+        }
+      } catch (e) {
+        this.aiMessages.push({ role:'assistant', content: '请求失败：' + (e.message||'未知错误') });
+      } finally {
+        this.aiLoading = false;
+        this.$nextTick(() => this.scrollAiChat());
+      }
+    },
+
+    async addAiTransaction(trans) {
+      await db.transactions.add({
+        type: trans.type || 'expense',
+        amount: trans.amount,
+        category: trans.category || '其他',
+        date: trans.date || new Date().toISOString().slice(0,10),
+        note: trans.note || '',
+        tags: '',
+        createdAt: new Date()
+      });
+      const msg = this.aiMessages.find(m => m.transaction === trans);
+      if (msg) {
+        msg.content += '<br><span class="text-green-500">✅ 已添加到账单</span>';
+        msg.transaction = null;
+      }
+      this.loadDashboard();
+    },
+
+    async generateReport(type) {
+      if (!this.apiKey) {
+        this.aiMessages.push({ role:'assistant', content:'请先在<b>设置</b>中配置 DeepSeek API 密钥。' });
+        return;
+      }
+      this.aiLoading = true;
+
+      const now = new Date();
+      let startDate, endDate;
+      if (type === 'week') {
+        const day = now.getDay() || 7;
+        startDate = new Date(now);
+        startDate.setDate(now.getDate() - day + 1);
+        endDate = new Date(startDate);
+        endDate.setDate(startDate.getDate() + 6);
+      } else {
+        startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+        endDate = new Date(now.getFullYear(), now.getMonth()+1, 0);
+      }
+      const s = startDate.toISOString().slice(0,10);
+      const e = endDate.toISOString().slice(0,10);
+
+      const records = await db.transactions.where('date').between(s, e, true, true).toArray();
+      const summary = {
+        period: `${s} ~ ${e}`,
+        totalExpense: records.filter(r=>r.type==='expense').reduce((a,r)=>a+r.amount,0),
+        totalIncome: records.filter(r=>r.type==='income').reduce((a,r)=>a+r.amount,0),
+        expenseByCat: {},
+        incomeByCat: {},
+        count: records.length,
+      };
+      for (const r of records) {
+        const map = r.type==='expense' ? summary.expenseByCat : summary.incomeByCat;
+        map[r.category] = (map[r.category]||0) + r.amount;
+      }
+
+      const periodName = type==='week'?'周报':'月报';
+
+      try {
+        const res = await fetch('https://api.deepseek.com/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Content-Type':'application/json', 'Authorization':`Bearer ${this.apiKey}` },
+          body: JSON.stringify({
+            model: 'deepseek-chat',
+            messages: [
+              { role:'system', content:`你是一个专业的消费分析助手。根据用户提供的${periodName}数据，生成简明扼要的消费分析报告。使用友好口语化的语气，每条建议前面加emoji。` },
+              { role:'user', content: `请根据以下数据生成${periodName}（${summary.period}）：\n总支出：¥${summary.totalExpense.toFixed(2)}\n总收入：¥${summary.totalIncome.toFixed(2)}\n支出分类：${JSON.stringify(summary.expenseByCat)}\n收入分类：${JSON.stringify(summary.incomeByCat)}\n共${summary.count}笔记录\n\n请包含：1.总体概况 2.支出分类占比分析 3.省钱建议（3条）` }
+            ],
+            temperature: 0.7,
+            max_tokens: 600
+          })
+        });
+        const data = await res.json();
+        const content = data.choices?.[0]?.message?.content || '报告生成失败';
+
+        this.aiMessages.push({
+          role:'assistant',
+          content: `<b>📊 ${periodName}（${summary.period}）</b><br><br>${content.replace(/\n/g, '<br>')}`,
+          reportType: type
+        });
+      } catch (e) {
+        this.aiMessages.push({ role:'assistant', content: '生成失败：' + (e.message||'未知错误') });
+      } finally {
+        this.aiLoading = false;
+        this.$nextTick(() => this.scrollAiChat());
+      }
+    },
+
+    scrollAiChat() {
+      const box = this.$refs.aiChatBox;
+      if (box) box.scrollTop = box.scrollHeight;
+    },
+
+    // ==================== SETTINGS ====================
+    saveApiKey() {
+      localStorage.setItem('deepseek_api_key', this.apiKey.trim());
+      alert('API 密钥已保存');
+    },
+
+    // ==================== BACKUP ====================
+    async exportData() {
+      const all = await db.transactions.toArray();
+      const json = JSON.stringify(all, null, 2);
+      const blob = new Blob([json], { type:'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const dateStr = new Date().toISOString().slice(0,10).replace(/-/g,'');
+      a.href = url;
+      a.download = `记账备份_${dateStr}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    },
+
+    async importData(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      this.restoreMsg = ''; this.restoreSuccess = false;
+
+      try {
+        const text = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = reject;
+          reader.readAsText(file);
+        });
+        const data = JSON.parse(text);
+        if (!Array.isArray(data)) throw new Error('文件格式错误');
+
+        if (!confirm(`即将导入 ${data.length} 条记录。\n选择"确定"替换所有数据，选择"取消"放弃导入。`)) return;
+
+        await db.transactions.clear();
+        for (const item of data) {
+          await db.transactions.add({
+            type: item.type,
+            amount: item.amount,
+            category: item.category,
+            date: item.date,
+            note: item.note || '',
+            tags: item.tags || '',
+            createdAt: new Date(item.createdAt || Date.now())
+          });
+        }
+        this.restoreMsg = `✅ 成功恢复 ${data.length} 条记录`;
+        this.restoreSuccess = true;
+        this.loadDashboard();
+        this.loadTransactions();
+      } catch (err) {
+        this.restoreMsg = '❌ 恢复失败：' + (err.message || '文件格式不正确');
+        this.restoreSuccess = false;
+      }
+      e.target.value = '';
+    },
+  },
+
+  async mounted() {
+    // Apply theme
+    if (this.theme === 'dark') {
+      document.documentElement.classList.add('dark');
+    }
+
+    // Register service worker
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('sw.js').catch(() => {});
+    }
+
+    // Load initial data
+    await this.loadDashboard();
+    await this.loadTransactions();
+  }
+});
+
+app.mount('#app');
+</script>
+</body>
+</html>
