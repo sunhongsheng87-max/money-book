@@ -494,15 +494,21 @@ const app = createApp({
       return this.form.type === 'expense' ? EXPENSE_CATS : INCOME_CATS;
     },
     groupedTransactions() {
-      const groups = {};
-      for (const t of this.transactions) {
-        const month = t.date.slice(0,7);
-        if (!groups[month]) groups[month] = { month, items:[], totalExpense:0, totalIncome:0 };
-        groups[month].items.push(t);
-        if (t.type === 'expense') groups[month].totalExpense += t.amount;
-        else groups[month].totalIncome += t.amount;
+      try {
+        const groups = {};
+        for (const t of this.transactions) {
+          if (!t.date) continue;
+          const month = t.date.slice(0,7);
+          if (!groups[month]) groups[month] = { month, items:[], totalExpense:0, totalIncome:0 };
+          groups[month].items.push(t);
+          if (t.type === 'expense') groups[month].totalExpense += t.amount;
+          else groups[month].totalIncome += t.amount;
+        }
+        return Object.values(groups).sort((a,b) => b.month.localeCompare(a.month));
+      } catch (e) {
+        console.error('groupedTransactions error:', e);
+        return [];
       }
-      return Object.values(groups).sort((a,b) => b.month.localeCompare(a.month));
     }
   },
 
@@ -763,28 +769,29 @@ const app = createApp({
 
     // ==================== LIST ====================
     async loadTransactions() {
-      let collection = db.transactions.orderBy('date').reverse();
+      try {
+        let results = await db.transactions.orderBy('date').reverse().toArray();
 
-      if (this.filterDateFrom && this.filterDateTo) {
-        collection = collection.filter(t => t.date >= this.filterDateFrom && t.date <= this.filterDateTo);
-      } else if (this.filterDateFrom) {
-        collection = collection.filter(t => t.date >= this.filterDateFrom);
-      } else if (this.filterDateTo) {
-        collection = collection.filter(t => t.date <= this.filterDateTo);
+        if (this.filterDateFrom) {
+          results = results.filter(t => t.date >= this.filterDateFrom);
+        }
+        if (this.filterDateTo) {
+          results = results.filter(t => t.date <= this.filterDateTo);
+        }
+        if (this.searchQuery.trim()) {
+          const q = this.searchQuery.trim().toLowerCase();
+          results = results.filter(t =>
+            (t.note||'').toLowerCase().includes(q) ||
+            (t.tags||'').toLowerCase().includes(q) ||
+            (t.category||'').toLowerCase().includes(q)
+          );
+        }
+
+        this.transactions = results;
+      } catch (e) {
+        console.error('loadTransactions error:', e);
+        this.transactions = [];
       }
-
-      let results = await collection.toArray();
-
-      if (this.searchQuery.trim()) {
-        const q = this.searchQuery.trim().toLowerCase();
-        results = results.filter(t =>
-          (t.note||'').toLowerCase().includes(q) ||
-          (t.tags||'').toLowerCase().includes(q) ||
-          (t.category||'').toLowerCase().includes(q)
-        );
-      }
-
-      this.transactions = results;
     },
 
     async deleteTransaction(id) {
