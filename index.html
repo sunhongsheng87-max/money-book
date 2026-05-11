@@ -40,7 +40,6 @@
     .typing-dot { animation: pulse-dot 1.4s infinite; }
     .typing-dot:nth-child(2) { animation-delay: 0.2s; }
     .typing-dot:nth-child(3) { animation-delay: 0.4s; }
-    [v-cloak] { display: none !important; }
   </style>
 </head>
 <body class="bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 min-h-screen transition-colors">
@@ -63,7 +62,7 @@
   </div>
 </div>
 
-<div id="app" v-cloak class="max-w-lg mx-auto min-h-screen flex flex-col relative">
+<div id="app" class="max-w-lg mx-auto min-h-screen flex flex-col relative">
 
   <!-- Header -->
   <header class="sticky top-0 z-30 bg-white/90 dark:bg-gray-800/90 backdrop-blur border-b border-gray-200 dark:border-gray-700 px-4 py-3 flex items-center justify-between">
@@ -411,17 +410,23 @@ function showError(type, msg) {
 window.onerror = function(msg, url, line) { showError('JS错误 (行'+line+')', msg); return false; };
 window.onunhandledrejection = function(e) { showError('Promise错误', e.reason); };
 
-// Clear SW & cache on ?reset param
+// Clear SW & cache on ?reset param (wait for completion before reload)
 if (location.search.includes('reset')) {
+  var p1 = Promise.resolve();
+  var p2 = Promise.resolve();
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.getRegistrations().then(function(regs) {
-      regs.forEach(function(r) { r.unregister(); });
+    p1 = navigator.serviceWorker.getRegistrations().then(function(regs) {
+      return Promise.all(regs.map(function(r) { return r.unregister(); }));
     });
   }
   if (window.caches) {
-    caches.keys().then(function(keys) { keys.forEach(function(k) { caches.delete(k); }); });
+    p2 = caches.keys().then(function(keys) {
+      return Promise.all(keys.map(function(k) { return caches.delete(k); }));
+    });
   }
-  location.search = '';
+  Promise.all([p1, p2]).then(function() {
+    location.href = location.origin + location.pathname;
+  });
 }
 
 // Fallback: show error if scripts fail to load within 10s
