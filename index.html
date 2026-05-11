@@ -394,6 +394,19 @@
 </div>
 
 <script>
+// Clear SW & cache on ?reset param
+if (location.search.includes('reset')) {
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.getRegistrations().then(function(regs) {
+      regs.forEach(function(r) { r.unregister(); });
+    });
+  }
+  if (window.caches) {
+    caches.keys().then(function(keys) { keys.forEach(function(k) { caches.delete(k); }); });
+  }
+  location.search = '';
+}
+
 // Fallback: show error if scripts fail to load within 10s
 setTimeout(function() {
   if (typeof Vue === 'undefined') {
@@ -555,124 +568,104 @@ const app = createApp({
     },
 
     async loadDashboard() {
-      const prefix = this.dashboardMonth;
-      const all = await db.transactions.where('date').startsWith(prefix).toArray();
+      try {
+        const prefix = this.dashboardMonth;
+        const all = await db.transactions.where('date').startsWith(prefix).toArray();
 
-      let expense = 0, income = 0;
-      const catMap = {};
-      for (const t of all) {
-        if (t.type === 'expense') {
-          expense += t.amount;
-          catMap[t.category] = (catMap[t.category]||0) + t.amount;
-        } else {
-          income += t.amount;
+        let expense = 0, income = 0;
+        const catMap = {};
+        for (const t of all) {
+          if (t.type === 'expense') {
+            expense += t.amount;
+            catMap[t.category] = (catMap[t.category]||0) + t.amount;
+          } else {
+            income += t.amount;
+          }
         }
-      }
-      this.dashboardSummary = { expense, income, balance: income - expense };
-      this.dashboardCatData = catMap;
+        this.dashboardSummary = { expense, income, balance: income - expense };
+        this.dashboardCatData = catMap;
 
-      // Trend (last 6 months)
-      const labels = [];
-      const expenses = [];
-      const incomes = [];
-      for (let i = 5; i >= 0; i--) {
-        const d = new Date();
-        d.setMonth(d.getMonth() - i);
-        const m = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-        labels.push(m.slice(2));
-        const recs = await db.transactions.where('date').startsWith(m).toArray();
-        expenses.push(recs.filter(r=>r.type==='expense').reduce((s,r)=>s+r.amount,0));
-        incomes.push(recs.filter(r=>r.type==='income').reduce((s,r)=>s+r.amount,0));
-      }
-      this.trendLabels = labels;
-      this.trendExpenses = expenses;
-      this.trendIncomes = incomes;
+        const labels = [], expenses = [], incomes = [];
+        for (let i = 5; i >= 0; i--) {
+          const d = new Date();
+          d.setMonth(d.getMonth() - i);
+          const m = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+          labels.push(m.slice(2));
+          const recs = await db.transactions.where('date').startsWith(m).toArray();
+          expenses.push(recs.filter(r=>r.type==='expense').reduce((s,r)=>s+r.amount,0));
+          incomes.push(recs.filter(r=>r.type==='income').reduce((s,r)=>s+r.amount,0));
+        }
+        this.trendLabels = labels;
+        this.trendExpenses = expenses;
+        this.trendIncomes = incomes;
 
-      this.$nextTick(() => this.loadCharts());
+        this.$nextTick(() => this.loadCharts());
+      } catch (e) {
+        console.error('loadDashboard error:', e);
+      }
     },
 
     loadCharts() {
-      // Destroy old charts
-      if (this.pieChart) { this.pieChart.destroy(); this.pieChart = null; }
-      if (this.lineChart) { this.lineChart.destroy(); this.lineChart = null; }
+      try {
+        if (this.pieChart) { this.pieChart.destroy(); this.pieChart = null; }
+        if (this.lineChart) { this.lineChart.destroy(); this.lineChart = null; }
 
-      const isDark = this.theme === 'dark';
-      const textColor = isDark ? '#9ca3af' : '#6b7280';
+        const isDark = this.theme === 'dark';
+        const textColor = isDark ? '#9ca3af' : '#6b7280';
 
-      // Pie chart
-      const pieCanvas = document.getElementById('pieChart');
-      if (pieCanvas && this.dashboardSummary.expense > 0) {
-        const catMap = this.dashboardCatData;
-        const colors = ['#f87171','#fb923c','#facc15','#4ade80','#60a5fa','#a78bfa','#f472b6'];
-        this.pieChart = new Chart(pieCanvas, {
-          type: 'doughnut',
-          data: {
-            labels: Object.keys(catMap),
-            datasets: [{
-              data: Object.values(catMap),
-              backgroundColor: colors.slice(0, Object.keys(catMap).length),
-              borderColor: isDark ? '#1f2937' : '#ffffff',
-              borderWidth: 2,
-            }]
-          },
-          options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-              legend: {
-                position: 'bottom',
-                labels: { color: textColor, padding: 16, font: { size: 11 }, usePointStyle: true, pointStyleWidth: 8 }
-              }
-            }
-          }
-        });
-      }
-
-      // Line chart
-      const lineCanvas = document.getElementById('lineChart');
-      if (lineCanvas && this.trendLabels.length > 0) {
-        this.lineChart = new Chart(lineCanvas, {
-          type: 'line',
-          data: {
-            labels: this.trendLabels,
-            datasets: [
-              {
-                label: '支出',
-                data: this.trendExpenses,
-                borderColor: '#f87171',
-                backgroundColor: 'rgba(248,113,113,0.1)',
-                fill: true,
-                tension: 0.4,
-                pointRadius: 4,
-                pointBackgroundColor: '#f87171',
+        const pieCanvas = document.getElementById('pieChart');
+        if (pieCanvas && this.dashboardSummary.expense > 0) {
+          const catMap = this.dashboardCatData;
+          if (Object.keys(catMap).length > 0) {
+            const colors = ['#f87171','#fb923c','#facc15','#4ade80','#60a5fa','#a78bfa','#f472b6'];
+            this.pieChart = new Chart(pieCanvas, {
+              type: 'doughnut',
+              data: {
+                labels: Object.keys(catMap),
+                datasets: [{
+                  data: Object.values(catMap),
+                  backgroundColor: colors.slice(0, Object.keys(catMap).length),
+                  borderColor: isDark ? '#1f2937' : '#ffffff',
+                  borderWidth: 2,
+                }]
               },
-              {
-                label: '收入',
-                data: this.trendIncomes,
-                borderColor: '#4ade80',
-                backgroundColor: 'rgba(74,222,128,0.1)',
-                fill: true,
-                tension: 0.4,
-                pointRadius: 4,
-                pointBackgroundColor: '#4ade80',
+              options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                  legend: { position:'bottom', labels:{ color:textColor, padding:16, font:{size:11}, usePointStyle:true, pointStyleWidth:8 } }
+                }
               }
-            ]
-          },
-          options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-              legend: {
-                position: 'bottom',
-                labels: { color: textColor, padding: 16, font: { size: 11 }, usePointStyle: true }
-              }
-            },
-            scales: {
-              x: { ticks: { color: textColor, font: { size: 10 } }, grid: { display: false } },
-              y: { ticks: { color: textColor, font: { size: 10 }, callback: v => '¥'+v }, grid: { color: isDark?'rgba(255,255,255,0.05)':'rgba(0,0,0,0.05)' } }
-            }
+            });
           }
-        });
+        }
+
+        const lineCanvas = document.getElementById('lineChart');
+        if (lineCanvas && this.trendLabels.length > 0) {
+          this.lineChart = new Chart(lineCanvas, {
+            type: 'line',
+            data: {
+              labels: this.trendLabels,
+              datasets: [
+                { label:'支出', data:this.trendExpenses, borderColor:'#f87171', backgroundColor:'rgba(248,113,113,0.1)', fill:true, tension:0.4, pointRadius:4, pointBackgroundColor:'#f87171' },
+                { label:'收入', data:this.trendIncomes, borderColor:'#4ade80', backgroundColor:'rgba(74,222,128,0.1)', fill:true, tension:0.4, pointRadius:4, pointBackgroundColor:'#4ade80' }
+              ]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: {
+                legend: { position:'bottom', labels:{ color:textColor, padding:16, font:{size:11}, usePointStyle:true } }
+              },
+              scales: {
+                x: { ticks:{ color:textColor, font:{size:10} }, grid:{ display:false } },
+                y: { ticks:{ color:textColor, font:{size:10}, callback:v=>'¥'+v }, grid:{ color:isDark?'rgba(255,255,255,0.05)':'rgba(0,0,0,0.05)' } }
+              }
+            }
+          });
+        }
+      } catch (e) {
+        console.error('loadCharts error:', e);
       }
     },
 
@@ -1020,10 +1013,6 @@ const app = createApp({
   },
 
   async mounted() {
-    // Hide loading overlay
-    var loadingEl = document.getElementById('app-loading');
-    if (loadingEl) loadingEl.remove();
-
     // Apply theme
     if (this.theme === 'dark') {
       document.documentElement.classList.add('dark');
@@ -1035,8 +1024,19 @@ const app = createApp({
     }
 
     // Load initial data
-    await this.loadDashboard();
-    await this.loadTransactions();
+    try {
+      await this.loadDashboard();
+      await this.loadTransactions();
+    } catch (e) {
+      console.error('Init error:', e);
+      document.getElementById('app-loading')?.classList.add('hidden');
+      document.getElementById('app-error')?.classList.remove('hidden');
+      return;
+    }
+
+    // Hide loading overlay only after successful init
+    var loadingEl = document.getElementById('app-loading');
+    if (loadingEl) loadingEl.remove();
   }
 });
 
