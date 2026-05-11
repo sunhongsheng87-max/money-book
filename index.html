@@ -1066,6 +1066,8 @@ app.config.errorHandler = function(err, vm, info) {
   showError('Vue错误', (err.message||err) + ' [' + info + ']');
   console.error(err);
 };
+app.config.globalProperties.catIcon = catIcon;
+app.config.globalProperties.catLabel = catLabel;
 app.mount('#app');
 </script>
 </body>
