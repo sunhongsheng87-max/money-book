@@ -1,12 +1,12 @@
-const CACHE_NAME = 'moneybook-v1';
+const CACHE_NAME = 'moneybook-v2';
 
 const PRECACHE = [
   '/',
   '/index.html',
   'https://cdn.tailwindcss.com/',
-  'https://unpkg.com/vue@3/dist/vue.global.prod.js',
-  'https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js',
-  'https://unpkg.com/dexie@3/dist/dexie.js',
+  'https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.prod.js',
+  'https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js',
+  'https://cdn.jsdelivr.net/npm/dexie@3/dist/dexie.min.js',
 ];
 
 self.addEventListener('install', (e) => {
@@ -28,7 +28,6 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;
 
-  // For DeepSeek API, bypass cache
   if (e.request.url.includes('api.deepseek.com')) return;
 
   e.respondWith(
