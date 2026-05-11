@@ -752,9 +752,10 @@ const app = createApp({
         this.form.category = json.category || (json.type==='expense'?'餐饮':'工资');
         this.form.note = json.note || '';
         this.form.date = json.date || today;
-        // Safety: reject dates before 2025 (AI hallucination)
-        if (json.date && json.date < '2025-01-01') {
-          this.form.date = today;
+        // Only trust AI date if within 7 days of today
+        if (json.date) {
+          const diff = Math.abs(new Date(json.date) - new Date(today)) / 86400000;
+          if (diff > 7) { this.form.date = today; }
         }
         this.form.tags = '';
       } catch (e) {
@@ -827,7 +828,7 @@ const app = createApp({
           body: JSON.stringify({
             model: 'deepseek-chat',
             messages: [
-              { role:'system', content:'你是一个智能记账助手。当用户输入消费描述时，提取结构化数据并返回JSON：{"amount":数字,"type":"expense或income","category":"分类","note":"备注","date":"YYYY-MM-DD"}。当用户问其他问题时，用中文友好回答。返回纯文本或JSON，不要markdown代码块。' },
+              { role:'system', content:`你是一个智能记账助手。今天的日期是${new Date().toISOString().slice(0,10)}。当用户输入消费描述时，提取结构化数据并返回JSON：{"amount":数字,"type":"expense或income","category":"分类","note":"备注","date":"YYYY-MM-DD"}。如果用户没有指定日期，使用今天的日期。当用户问其他问题时，用中文友好回答。返回纯文本或JSON，不要markdown代码块。` },
               ...this.aiMessages.filter(m=>!m.transaction).map(m=>({ role:m.role, content: m.content.replace(/<[^>]+>/g,'') }))
             ],
             temperature: 0.7,
@@ -841,9 +842,14 @@ const app = createApp({
         try {
           const json = JSON.parse(content.replace(/```json|```/g, '').trim());
           if (json.amount) {
+            const today = new Date().toISOString().slice(0,10);
+            if (json.date) {
+              const diff = Math.abs(new Date(json.date) - new Date(today)) / 86400000;
+              if (diff > 7) { json.date = today; }
+            } else { json.date = today; }
             this.aiMessages.push({
               role:'assistant',
-              content: `📝 识别到记账记录：<br>类型：<b>${json.type==='expense'?'支出':'收入'}</b> | 金额：<b>¥${json.amount}</b> | 分类：<b>${json.category}</b> | 日期：<b>${json.date||'今天'}</b><br>备注：${json.note||'无'}`,
+              content: `📝 识别到记账记录：<br>类型：<b>${json.type==='expense'?'支出':'收入'}</b> | 金额：<b>¥${json.amount}</b> | 分类：<b>${json.category}</b> | 日期：<b>${json.date}</b><br>备注：${json.note||'无'}`,
               transaction: json
             });
           }
