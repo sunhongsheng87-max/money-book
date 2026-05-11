@@ -394,6 +394,17 @@
 </div>
 
 <script>
+// Global error display
+window.onerror = function(msg, url, line) {
+  var el = document.getElementById('app-loading');
+  if (el) el.innerHTML = '<div class="text-center px-4"><p class="text-4xl mb-3">❌</p><p class="text-sm text-red-500 font-semibold mb-2">JS 错误</p><p class="text-xs text-gray-500 break-all">' + String(msg).slice(0, 200) + '</p><p class="text-xs text-gray-400 mt-1">行 ' + line + '</p></div>';
+  return false;
+};
+window.onunhandledrejection = function(e) {
+  var el = document.getElementById('app-loading');
+  if (el) el.innerHTML = '<div class="text-center px-4"><p class="text-4xl mb-3">❌</p><p class="text-sm text-red-500 font-semibold mb-2">Promise 错误</p><p class="text-xs text-gray-500 break-all">' + String(e.reason).slice(0, 200) + '</p></div>';
+};
+
 // Clear SW & cache on ?reset param
 if (location.search.includes('reset')) {
   if ('serviceWorker' in navigator) {
