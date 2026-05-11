@@ -751,12 +751,8 @@ const app = createApp({
         this.form.amount = json.amount || 0;
         this.form.category = json.category || (json.type==='expense'?'餐饮':'工资');
         this.form.note = json.note || '';
-        this.form.date = json.date || today;
-        // Only trust AI date if within 7 days of today
-        if (json.date) {
-          const diff = Math.abs(new Date(json.date) - new Date(today)) / 86400000;
-          if (diff > 7) { this.form.date = today; }
-        }
+        // Always use today for quick-add; user can manually change if needed
+        this.form.date = today;
         this.form.tags = '';
       } catch (e) {
         this.aiError = '识别失败：' + (e.message || '请检查网络和API密钥');
