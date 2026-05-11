@@ -733,7 +733,7 @@ const app = createApp({
           body: JSON.stringify({
             model: 'deepseek-chat',
             messages: [
-              { role:'system', content:'你是一个记账助手。从用户输入中提取：金额、类型(expense/income)、分类、备注、日期。\n分类选项 - 支出：餐饮、购物、交通、居住、娱乐、医疗、其他；收入：工资、奖金、兼职、投资、其他。\n返回纯JSON，不要包含markdown格式：{"amount":数字,"type":"expense或income","category":"分类","note":"备注","date":"YYYY-MM-DD"}\n如果无法识别，返回{"error":"无法识别"}' },
+              { role:'system', content:`你是一个记账助手。今天的日期是${new Date().toISOString().slice(0,10)}。从用户输入中提取：金额、类型(expense/income)、分类、备注、日期。如果用户没有指定日期，使用今天的日期。\n分类选项 - 支出：餐饮、购物、交通、居住、娱乐、医疗、其他；收入：工资、奖金、兼职、投资、其他。\n返回纯JSON，不要包含markdown格式：{"amount":数字,"type":"expense或income","category":"分类","note":"备注","date":"YYYY-MM-DD"}\n如果无法识别，返回{"error":"无法识别"}` },
               { role:'user', content: this.aiInput }
             ],
             temperature: 0.1,
@@ -746,16 +746,17 @@ const app = createApp({
 
         if (json.error) { this.aiError = json.error; return; }
 
+        const today = new Date().toISOString().slice(0,10);
         this.form.type = json.type || 'expense';
         this.form.amount = json.amount || 0;
         this.form.category = json.category || (json.type==='expense'?'餐饮':'工资');
         this.form.note = json.note || '';
-        this.form.date = json.date || new Date().toISOString().slice(0,10);
-        this.form.tags = '';
-
-        if (json.date && json.date !== this.form.date) {
-          // date parsed by AI, keep it
+        this.form.date = json.date || today;
+        // Safety: reject dates before 2025 (AI hallucination)
+        if (json.date && json.date < '2025-01-01') {
+          this.form.date = today;
         }
+        this.form.tags = '';
       } catch (e) {
         this.aiError = '识别失败：' + (e.message || '请检查网络和API密钥');
       } finally {
