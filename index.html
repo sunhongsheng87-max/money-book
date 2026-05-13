@@ -22,9 +22,9 @@
       }
     }
   </script>
-  <script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.prod.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/dexie@3/dist/dexie.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.prod.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dexie@3/dist/dexie.min.js" crossorigin="anonymous"></script>
   <style>
     * { -webkit-tap-highlight-color: transparent; }
     body { overscroll-behavior: none; }
@@ -701,10 +701,7 @@ const app = createApp({
 
   watch: {
     currentTab(v) {
-      if (v === 'dashboard') {
-        this.loadDashboard();
-        this.$nextTick(() => this.loadCharts());
-      }
+      if (v === 'dashboard') { this.loadDashboard(); }
       if (v === 'list') { this.loadTransactions(); }
       if (v === 'ai') { this.$nextTick(() => this.scrollAiChat()); }
     },
