@@ -239,7 +239,7 @@
           </div>
           <span class="text-2xl">{{ catIcon(t.category, t.type) }}</span>
           <div class="flex-1 min-w-0" @touchstart="touchStart($event,t)" @touchend="touchEnd($event,t)"
-            @click="swipeId ? (swipeId=null) : null">
+            @click="swipeId ? (swipeId=null) : openEditModal(t)">
             <div class="flex items-center justify-between">
               <span class="text-sm font-medium truncate">{{ t.note || catLabel(t.category, t.type) }}</span>
               <span :class="t.type==='expense'?'text-red-500':'text-green-500'" class="font-semibold text-sm">
@@ -258,6 +258,77 @@
         </div>
       </div>
       <p v-if="groupedTransactions.length===0" class="text-center text-gray-400 text-sm py-12">暂无账单记录</p>
+    </div>
+
+    <!-- ==================== EDIT MODAL ==================== -->
+    <div v-if="editModal.show" class="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
+      <div class="absolute inset-0 bg-black/50" @click="closeEditModal"></div>
+      <div class="relative bg-white dark:bg-gray-800 rounded-t-2xl sm:rounded-2xl w-full sm:max-w-md max-h-[90vh] overflow-y-auto p-5 shadow-xl space-y-4">
+        <h3 class="text-sm font-semibold">✏️ 编辑账单</h3>
+
+        <!-- Type Toggle -->
+        <div class="flex rounded-lg bg-gray-100 dark:bg-gray-700 p-1">
+          <button @click="editModal.type='expense'"
+            :class="editModal.type==='expense'?'bg-white dark:bg-gray-600 shadow-sm text-red-500':'text-gray-500'"
+            class="flex-1 py-2 text-sm font-medium rounded-md transition-all">支出</button>
+          <button @click="editModal.type='income'"
+            :class="editModal.type==='income'?'bg-white dark:bg-gray-600 shadow-sm text-green-500':'text-gray-500'"
+            class="flex-1 py-2 text-sm font-medium rounded-md transition-all">收入</button>
+        </div>
+
+        <!-- Amount -->
+        <div>
+          <label class="text-xs text-gray-500 dark:text-gray-400 mb-1 block">金额</label>
+          <input v-model.number="editModal.amount" type="number" step="0.01" min="0"
+            class="w-full px-3 py-2 text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
+        </div>
+
+        <!-- Category -->
+        <div>
+          <label class="text-xs text-gray-500 dark:text-gray-400 mb-1 block">分类</label>
+          <div class="grid grid-cols-4 gap-2">
+            <button v-for="cat in editModalCategories" :key="cat.value"
+              @click="editModal.category=cat.value"
+              :class="editModal.category===cat.value?'ring-2 ring-blue-500 bg-blue-50 dark:bg-blue-900/30':'bg-gray-50 dark:bg-gray-700'"
+              class="py-2 rounded-lg text-xs text-center transition-all">
+              <span class="block text-lg">{{ cat.icon }}</span>
+              {{ cat.label }}
+            </button>
+          </div>
+        </div>
+
+        <!-- Date -->
+        <div>
+          <label class="text-xs text-gray-500 dark:text-gray-400 mb-1 block">日期</label>
+          <input v-model="editModal.date" type="date"
+            class="w-full px-3 py-2 text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
+        </div>
+
+        <!-- Note -->
+        <div>
+          <label class="text-xs text-gray-500 dark:text-gray-400 mb-1 block">备注</label>
+          <input v-model="editModal.note" type="text" placeholder="写点什么..."
+            class="w-full px-3 py-2 text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
+        </div>
+
+        <!-- Tags -->
+        <div>
+          <label class="text-xs text-gray-500 dark:text-gray-400 mb-1 block">标签（逗号分隔）</label>
+          <input v-model="editModal.tags" type="text" placeholder="例如：外卖,周末"
+            class="w-full px-3 py-2 text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
+        </div>
+
+        <!-- Actions -->
+        <div class="flex gap-2">
+          <button @click="saveEdit" class="flex-1 py-3 rounded-xl bg-blue-500 text-white font-semibold text-sm hover:bg-blue-600">
+            💾 保存
+          </button>
+          <button @click="deleteFromModal" class="px-4 py-3 rounded-xl bg-red-500 text-white font-semibold text-sm hover:bg-red-600">
+            🗑
+          </button>
+        </div>
+        <button @click="closeEditModal" class="w-full py-2 text-sm text-gray-500">取消</button>
+      </div>
     </div>
 
     <!-- ==================== AI ASSISTANT ==================== -->
@@ -371,6 +442,74 @@
         </div>
       </div>
 
+      <!-- Category Management -->
+      <div class="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm space-y-4">
+        <h3 class="text-sm font-semibold">📂 分类管理</h3>
+
+        <!-- Expense categories -->
+        <div>
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-xs text-gray-500">支出分类</span>
+          </div>
+          <div class="space-y-1">
+            <div v-for="cat in categories.filter(c=>c.type==='expense')" :key="cat.id"
+              class="flex items-center justify-between py-1.5 px-2 rounded-lg bg-gray-50 dark:bg-gray-700/50">
+              <div class="flex items-center gap-2">
+                <span class="text-lg">{{ cat.icon }}</span>
+                <span class="text-sm">{{ cat.label }}</span>
+              </div>
+              <button @click="deleteCategory(cat)" class="text-xs text-red-400 hover:text-red-600 px-2 py-0.5">删除</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Income categories -->
+        <div>
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-xs text-gray-500">收入分类</span>
+          </div>
+          <div class="space-y-1">
+            <div v-for="cat in categories.filter(c=>c.type==='income')" :key="cat.id"
+              class="flex items-center justify-between py-1.5 px-2 rounded-lg bg-gray-50 dark:bg-gray-700/50">
+              <div class="flex items-center gap-2">
+                <span class="text-lg">{{ cat.icon }}</span>
+                <span class="text-sm">{{ cat.label }}</span>
+              </div>
+              <button @click="deleteCategory(cat)" class="text-xs text-red-400 hover:text-red-600 px-2 py-0.5">删除</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Add new category -->
+        <div class="border-t border-gray-100 dark:border-gray-700 pt-3">
+          <p class="text-xs text-gray-500 mb-2">添加新分类</p>
+          <div class="flex gap-2 items-end">
+            <div class="w-14">
+              <label class="text-xs text-gray-400 block mb-0.5">图标</label>
+              <input v-model="newCat.icon" type="text" maxlength="2" placeholder="📌"
+                class="w-full px-2 py-2 text-center text-lg rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
+            </div>
+            <div class="flex-1">
+              <label class="text-xs text-gray-400 block mb-0.5">名称</label>
+              <input v-model="newCat.label" type="text" placeholder="分类名"
+                class="w-full px-3 py-2 text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
+            </div>
+            <div class="w-20">
+              <label class="text-xs text-gray-400 block mb-0.5">类型</label>
+              <select v-model="newCat.type"
+                class="w-full px-2 py-2 text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 focus:outline-none">
+                <option value="expense">支出</option>
+                <option value="income">收入</option>
+              </select>
+            </div>
+            <button @click="addCategory" :disabled="!newCat.label.trim()"
+              class="px-4 py-2 bg-blue-500 text-white text-sm rounded-lg font-medium hover:bg-blue-600 disabled:opacity-50 shrink-0">
+              添加
+            </button>
+          </div>
+        </div>
+      </div>
+
       <!-- About -->
       <div class="text-center text-xs text-gray-400 py-4">
         <p>我的记账本 v1.0 · 数据仅存储在本地</p>
@@ -441,37 +580,42 @@ setTimeout(function() {
 <script>
 const { createApp } = Vue;
 
-// ==================== CONSTANTS ====================
-const EXPENSE_CATS = [
-  { value:'餐饮', label:'餐饮', icon:'🍔' },
-  { value:'购物', label:'购物', icon:'🛍️' },
-  { value:'交通', label:'交通', icon:'🚗' },
-  { value:'居住', label:'居住', icon:'🏠' },
-  { value:'娱乐', label:'娱乐', icon:'🎮' },
-  { value:'医疗', label:'医疗', icon:'💊' },
-  { value:'其他', label:'其他', icon:'📦' },
+// ==================== DEFAULT CATEGORIES ====================
+const DEFAULT_EXPENSE_CATS = [
+  { value:'餐饮', label:'餐饮', icon:'🍔', type:'expense' },
+  { value:'购物', label:'购物', icon:'🛍️', type:'expense' },
+  { value:'交通', label:'交通', icon:'🚗', type:'expense' },
+  { value:'居住', label:'居住', icon:'🏠', type:'expense' },
+  { value:'娱乐', label:'娱乐', icon:'🎮', type:'expense' },
+  { value:'医疗', label:'医疗', icon:'💊', type:'expense' },
+  { value:'其他', label:'其他', icon:'📦', type:'expense' },
 ];
-const INCOME_CATS = [
-  { value:'工资', label:'工资', icon:'💼' },
-  { value:'奖金', label:'奖金', icon:'🎁' },
-  { value:'兼职', label:'兼职', icon:'💻' },
-  { value:'投资', label:'投资', icon:'📈' },
-  { value:'其他', label:'其他', icon:'💰' },
+const DEFAULT_INCOME_CATS = [
+  { value:'工资', label:'工资', icon:'💼', type:'income' },
+  { value:'奖金', label:'奖金', icon:'🎁', type:'income' },
+  { value:'兼职', label:'兼职', icon:'💻', type:'income' },
+  { value:'投资', label:'投资', icon:'📈', type:'income' },
+  { value:'其他', label:'其他', icon:'💰', type:'income' },
 ];
-const ALL_CATS = [...EXPENSE_CATS, ...INCOME_CATS];
+
+let _appCategories = [...DEFAULT_EXPENSE_CATS, ...DEFAULT_INCOME_CATS];
 
 function catIcon(cat, type) {
-  const cats = type === 'expense' ? EXPENSE_CATS : INCOME_CATS;
+  const cats = _appCategories.filter(c => c.type === type);
   return cats.find(c => c.value === cat)?.icon || '📌';
 }
 function catLabel(cat, type) {
-  const cats = type === 'expense' ? EXPENSE_CATS : INCOME_CATS;
+  const cats = _appCategories.filter(c => c.type === type);
   return cats.find(c => c.value === cat)?.label || cat;
 }
 
 // ==================== DATABASE ====================
 const db = new Dexie('MoneyBookDB');
 db.version(1).stores({
+  transactions: '++id, type, category, date, amount, note, tags, createdAt'
+});
+db.version(2).stores({
+  categories: '++id, type',
   transactions: '++id, type, category, date, amount, note, tags, createdAt'
 });
 
@@ -521,12 +665,20 @@ const app = createApp({
         { key:'ai', label:'AI', icon:'🤖' },
         { key:'settings', label:'我的', icon:'⚙️' },
       ],
+      // Categories
+      categories: [],
+      newCat: { icon:'📌', label:'', type:'expense' },
+      // Edit modal
+      editModal: { show:false, id:null, type:'expense', amount:0, category:'', date:'', note:'', tags:'' },
     }
   },
 
   computed: {
     currentCategories() {
-      return this.form.type === 'expense' ? EXPENSE_CATS : INCOME_CATS;
+      return this.categories.filter(c => c.type === this.form.type);
+    },
+    editModalCategories() {
+      return this.categories.filter(c => c.type === this.editModal.type);
     },
     groupedTransactions() {
       try {
@@ -549,7 +701,10 @@ const app = createApp({
 
   watch: {
     currentTab(v) {
-      if (v === 'dashboard') { this.loadDashboard(); }
+      if (v === 'dashboard') {
+        this.loadDashboard();
+        this.$nextTick(() => this.loadCharts());
+      }
       if (v === 'list') { this.loadTransactions(); }
       if (v === 'ai') { this.$nextTick(() => this.scrollAiChat()); }
     },
@@ -562,8 +717,13 @@ const app = createApp({
     },
     'form.type'(v) {
       if (!this.editingId) {
-        this.form.category = v === 'expense' ? '餐饮' : '工资';
+        const first = this.categories.filter(c => c.type === v)[0];
+        this.form.category = first ? first.value : '';
       }
+    },
+    'editModal.type'(v) {
+      const first = this.categories.filter(c => c.type === v)[0];
+      this.editModal.category = first ? first.value : '';
     }
   },
 
@@ -621,7 +781,9 @@ const app = createApp({
         this.trendExpenses = expenses;
         this.trendIncomes = incomes;
 
-        this.$nextTick(() => this.loadCharts());
+        if (this.currentTab === 'dashboard') {
+          this.$nextTick(() => this.loadCharts());
+        }
       } catch (e) {
         console.error('loadDashboard error:', e);
       }
@@ -716,7 +878,8 @@ const app = createApp({
       this.form.amount = null;
       this.form.note = '';
       this.form.tags = '';
-      this.form.category = this.form.type === 'expense' ? '餐饮' : '工资';
+      const first = this.categories.filter(c => c.type === this.form.type)[0];
+      this.form.category = first ? first.value : '';
       this.editingId = null;
       this.loadDashboard();
     },
@@ -734,11 +897,12 @@ const app = createApp({
     },
 
     cancelEdit() {
+      const first = this.categories.filter(c => c.type === this.form.type)[0];
       this.editingId = null;
       this.form.amount = null;
       this.form.note = '';
       this.form.tags = '';
-      this.form.category = '餐饮';
+      this.form.category = first ? first.value : '';
     },
 
     // ==================== AI PARSE ====================
@@ -747,6 +911,9 @@ const app = createApp({
       if (!this.apiKey) { this.aiError = '请先在"设置"中配置 DeepSeek API 密钥'; return; }
       this.aiLoading = true; this.aiError = '';
 
+      const expenseCats = this.categories.filter(c => c.type === 'expense').map(c => c.label).join('、');
+      const incomeCats = this.categories.filter(c => c.type === 'income').map(c => c.label).join('、');
+
       try {
         const res = await fetch('https://api.deepseek.com/v1/chat/completions', {
           method: 'POST',
@@ -754,7 +921,7 @@ const app = createApp({
           body: JSON.stringify({
             model: 'deepseek-chat',
             messages: [
-              { role:'system', content:`你是一个记账助手。今天的日期是${new Date().toISOString().slice(0,10)}。从用户输入中提取：金额、类型(expense/income)、分类、备注、日期。如果用户没有指定日期，使用今天的日期。\n分类选项 - 支出：餐饮、购物、交通、居住、娱乐、医疗、其他；收入：工资、奖金、兼职、投资、其他。\n返回纯JSON，不要包含markdown格式：{"amount":数字,"type":"expense或income","category":"分类","note":"备注","date":"YYYY-MM-DD"}\n如果无法识别，返回{"error":"无法识别"}` },
+              { role:'system', content:`你是一个记账助手。今天的日期是${new Date().toISOString().slice(0,10)}。从用户输入中提取：金额、类型(expense/income)、分类、备注、日期。如果用户没有指定日期，使用今天的日期。\n分类选项 - 支出：${expenseCats}；收入：${incomeCats}。\n返回纯JSON，不要包含markdown格式：{"amount":数字,"type":"expense或income","category":"分类","note":"备注","date":"YYYY-MM-DD"}\n如果无法识别，返回{"error":"无法识别"}` },
               { role:'user', content: this.aiInput }
             ],
             temperature: 0.1,
@@ -770,7 +937,7 @@ const app = createApp({
         const today = new Date().toISOString().slice(0,10);
         this.form.type = json.type || 'expense';
         this.form.amount = json.amount || 0;
-        this.form.category = json.category || (json.type==='expense'?'餐饮':'工资');
+        this.form.category = json.category || (this.categories.filter(c => c.type === (json.type||'expense'))[0]?.value || '');
         this.form.note = json.note || '';
         // Always use today for quick-add; user can manually change if needed
         this.form.date = today;
@@ -839,6 +1006,9 @@ const app = createApp({
       this.aiLoading = true;
       this.$nextTick(() => this.scrollAiChat());
 
+      const expenseCats = this.categories.filter(c => c.type === 'expense').map(c => c.label).join('、');
+      const incomeCats = this.categories.filter(c => c.type === 'income').map(c => c.label).join('、');
+
       try {
         const res = await fetch('https://api.deepseek.com/v1/chat/completions', {
           method: 'POST',
@@ -846,7 +1016,7 @@ const app = createApp({
           body: JSON.stringify({
             model: 'deepseek-chat',
             messages: [
-              { role:'system', content:`你是一个智能记账助手。今天的日期是${new Date().toISOString().slice(0,10)}。当用户输入消费描述时，提取结构化数据并返回JSON：{"amount":数字,"type":"expense或income","category":"分类","note":"备注","date":"YYYY-MM-DD"}。如果用户没有指定日期，使用今天的日期。当用户问其他问题时，用中文友好回答。返回纯文本或JSON，不要markdown代码块。` },
+              { role:'system', content:`你是一个智能记账助手。今天的日期是${new Date().toISOString().slice(0,10)}。当用户输入消费描述时，提取结构化数据并返回JSON：{"amount":数字,"type":"expense或income","category":"分类","note":"备注","date":"YYYY-MM-DD"}。分类选项 - 支出：${expenseCats}；收入：${incomeCats}。如果用户没有指定日期，使用今天的日期。当用户问其他问题时，用中文友好回答。返回纯文本或JSON，不要markdown代码块。` },
               ...this.aiMessages.filter(m=>!m.transaction).map(m=>({ role:m.role, content: m.content.replace(/<[^>]+>/g,'') }))
             ],
             temperature: 0.7,
@@ -973,6 +1143,76 @@ const app = createApp({
       if (box) box.scrollTop = box.scrollHeight;
     },
 
+    // ==================== EDIT MODAL ====================
+    openEditModal(t) {
+      this.editModal = {
+        show: true,
+        id: t.id,
+        type: t.type,
+        amount: t.amount,
+        category: t.category,
+        date: t.date,
+        note: t.note || '',
+        tags: t.tags || ''
+      };
+    },
+    closeEditModal() {
+      this.editModal.show = false;
+    },
+    async saveEdit() {
+      if (!this.editModal.amount || this.editModal.amount <= 0) {
+        alert('请输入有效金额'); return;
+      }
+      await db.transactions.update(this.editModal.id, {
+        type: this.editModal.type,
+        amount: this.editModal.amount,
+        category: this.editModal.category,
+        date: this.editModal.date,
+        note: this.editModal.note || catLabel(this.editModal.category, this.editModal.type),
+        tags: this.editModal.tags,
+        createdAt: new Date()
+      });
+      this.editModal.show = false;
+      this.loadTransactions();
+      this.loadDashboard();
+    },
+    async deleteFromModal() {
+      if (!confirm('确定删除这条记录吗？')) return;
+      await db.transactions.delete(this.editModal.id);
+      this.editModal.show = false;
+      this.loadTransactions();
+      this.loadDashboard();
+    },
+
+    // ==================== CATEGORIES ====================
+    async initCategories() {
+      const count = await db.categories.count();
+      if (count === 0) {
+        await db.categories.bulkAdd([...DEFAULT_EXPENSE_CATS, ...DEFAULT_INCOME_CATS]);
+      }
+    },
+    async loadCategories() {
+      this.categories = await db.categories.toArray();
+      _appCategories = this.categories;
+    },
+    async addCategory() {
+      if (!this.newCat.label.trim()) return;
+      await db.categories.add({
+        value: this.newCat.label.trim(),
+        label: this.newCat.label.trim(),
+        icon: this.newCat.icon || '📌',
+        type: this.newCat.type
+      });
+      this.newCat.label = '';
+      this.newCat.icon = '📌';
+      await this.loadCategories();
+    },
+    async deleteCategory(cat) {
+      if (!confirm(`确定删除分类"${cat.label}"吗？已有记录不受影响。`)) return;
+      await db.categories.delete(cat.id);
+      await this.loadCategories();
+    },
+
     // ==================== SETTINGS ====================
     saveApiKey() {
       localStorage.setItem('deepseek_api_key', this.apiKey.trim());
@@ -981,8 +1221,9 @@ const app = createApp({
 
     // ==================== BACKUP ====================
     async exportData() {
-      const all = await db.transactions.toArray();
-      const json = JSON.stringify(all, null, 2);
+      const transactions = await db.transactions.toArray();
+      const categories = await db.categories.toArray();
+      const json = JSON.stringify({ transactions, categories }, null, 2);
       const blob = new Blob([json], { type:'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -1006,12 +1247,24 @@ const app = createApp({
           reader.readAsText(file);
         });
         const data = JSON.parse(text);
-        if (!Array.isArray(data)) throw new Error('文件格式错误');
 
-        if (!confirm(`即将导入 ${data.length} 条记录。\n选择"确定"替换所有数据，选择"取消"放弃导入。`)) return;
+        // Support both old format (array) and new format ({transactions, categories})
+        let transactions, categories;
+        if (Array.isArray(data)) {
+          transactions = data;
+          categories = null;
+        } else {
+          transactions = data.transactions;
+          categories = data.categories;
+        }
+
+        if (!Array.isArray(transactions)) throw new Error('文件格式错误');
+
+        const count = transactions.length + (categories ? categories.length : 0);
+        if (!confirm(`即将导入 ${transactions.length} 条记录${categories ? '和 ' + categories.length + ' 个分类' : ''}。\n选择"确定"替换所有数据，选择"取消"放弃导入。`)) return;
 
         await db.transactions.clear();
-        for (const item of data) {
+        for (const item of transactions) {
           await db.transactions.add({
             type: item.type,
             amount: item.amount,
@@ -1022,7 +1275,21 @@ const app = createApp({
             createdAt: new Date(item.createdAt || Date.now())
           });
         }
-        this.restoreMsg = `✅ 成功恢复 ${data.length} 条记录`;
+
+        if (categories && categories.length > 0) {
+          await db.categories.clear();
+          for (const cat of categories) {
+            await db.categories.add({
+              value: cat.value,
+              label: cat.label,
+              icon: cat.icon,
+              type: cat.type
+            });
+          }
+        }
+
+        await this.loadCategories();
+        this.restoreMsg = `✅ 成功恢复 ${transactions.length} 条记录${categories ? '和 ' + categories.length + ' 个分类' : ''}`;
         this.restoreSuccess = true;
         this.loadDashboard();
         this.loadTransactions();
@@ -1047,6 +1314,8 @@ const app = createApp({
 
     // Load initial data
     try {
+      await this.initCategories();
+      await this.loadCategories();
       await this.loadDashboard();
       await this.loadTransactions();
     } catch (e) {
