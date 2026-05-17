@@ -353,6 +353,23 @@
         </div>
       </div>
 
+      <!-- Report History -->
+      <div v-if="reports.length>0" class="bg-white dark:bg-gray-800 rounded-xl p-3 shadow-sm space-y-2">
+        <h3 class="text-sm font-semibold">📋 历史报告</h3>
+        <div v-for="r in reports" :key="r.id" class="border border-gray-100 dark:border-gray-700 rounded-lg">
+          <button @click="reportExpandedId = reportExpandedId===r.id ? null : r.id"
+            class="w-full flex items-center justify-between px-3 py-2 text-left">
+            <span class="text-sm">
+              <span>{{ r.type==='weekly'?'📅 周报':'📊 月报' }}</span>
+              <span class="text-gray-400 ml-2 text-xs">{{ r.period }}</span>
+            </span>
+            <span class="text-xs text-gray-400">{{ new Date(r.createdAt).toISOString().slice(0,10) }}</span>
+          </button>
+          <div v-if="reportExpandedId===r.id" class="px-3 pb-3 text-sm border-t border-gray-100 dark:border-gray-700 pt-2"
+            v-html="r.content"></div>
+        </div>
+      </div>
+
       <!-- Report Buttons -->
       <div class="flex gap-2">
         <button @click="generateReport('week')" :disabled="aiLoading"
@@ -618,6 +635,11 @@ db.version(2).stores({
   categories: '++id, type',
   transactions: '++id, type, category, date, amount, note, tags, createdAt'
 });
+db.version(3).stores({
+  reports: '++id, type, period',
+  categories: '++id, type',
+  transactions: '++id, type, category, date, amount, note, tags, createdAt'
+});
 
 // ==================== VUE APP ====================
 const app = createApp({
@@ -670,6 +692,10 @@ const app = createApp({
       newCat: { icon:'📌', label:'', type:'expense' },
       // Edit modal
       editModal: { show:false, id:null, type:'expense', amount:0, category:'', date:'', note:'', tags:'' },
+      // Reports
+      reports: [],
+      generatingReport: false,
+      reportExpandedId: null,
     }
   },
 
@@ -703,7 +729,11 @@ const app = createApp({
     currentTab(v) {
       if (v === 'dashboard') { this.loadDashboard(); }
       if (v === 'list') { this.loadTransactions(); }
-      if (v === 'ai') { this.$nextTick(() => this.scrollAiChat()); }
+      if (v === 'ai') {
+        this.checkAndGenerateReports();
+        this.loadReports();
+        this.$nextTick(() => this.scrollAiChat());
+      }
     },
     theme(v) {
       document.documentElement.classList.toggle('dark', v === 'dark');
@@ -1140,6 +1170,122 @@ const app = createApp({
       if (box) box.scrollTop = box.scrollHeight;
     },
 
+    // ==================== AUTO REPORTS ====================
+    getWeekPeriod(d) {
+      const yearStart = new Date(d.getFullYear(), 0, 1);
+      const days = Math.floor((d - yearStart) / 86400000);
+      const weekNum = Math.ceil((days + yearStart.getDay() + 1) / 7);
+      return `${d.getFullYear()}-W${String(weekNum).padStart(2,'0')}`;
+    },
+
+    async generateAndSaveReport(type, period) {
+      if (this.generatingReport || !this.apiKey) return;
+      this.generatingReport = true;
+
+      let startDate, endDate;
+      if (type === 'weekly') {
+        const parts = period.split('-W');
+        const year = parseInt(parts[0]), week = parseInt(parts[1]);
+        const jan4 = new Date(year, 0, 4);
+        const firstMonday = new Date(jan4);
+        firstMonday.setDate(jan4.getDate() - ((jan4.getDay() + 6) % 7));
+        startDate = new Date(firstMonday);
+        startDate.setDate(firstMonday.getDate() + (week - 1) * 7);
+        endDate = new Date(startDate);
+        endDate.setDate(startDate.getDate() + 6);
+      } else {
+        const parts = period.split('-');
+        const year = parseInt(parts[0]), month = parseInt(parts[1]);
+        startDate = new Date(year, month - 1, 1);
+        endDate = new Date(year, month, 0);
+      }
+      const s = startDate.toISOString().slice(0,10);
+      const e = endDate.toISOString().slice(0,10);
+
+      const records = await db.transactions.where('date').between(s, e, true, true).toArray();
+      if (records.length === 0) {
+        this.generatingReport = false;
+        return;
+      }
+
+      const summary = {
+        period: `${s} ~ ${e}`,
+        totalExpense: records.filter(r=>r.type==='expense').reduce((a,r)=>a+r.amount,0),
+        totalIncome: records.filter(r=>r.type==='income').reduce((a,r)=>a+r.amount,0),
+        expenseByCat: {},
+        incomeByCat: {},
+        count: records.length,
+      };
+      for (const r of records) {
+        const map = r.type==='expense' ? summary.expenseByCat : summary.incomeByCat;
+        map[r.category] = (map[r.category]||0) + r.amount;
+      }
+
+      const periodName = type==='weekly'?'周报':'月报';
+
+      try {
+        const res = await fetch('https://api.deepseek.com/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Content-Type':'application/json', 'Authorization':`Bearer ${this.apiKey}` },
+          body: JSON.stringify({
+            model: 'deepseek-chat',
+            messages: [
+              { role:'system', content:`你是一个专业的消费分析助手。根据用户提供的${periodName}数据，生成简明扼要的消费分析报告。使用友好口语化的语气，每条建议前面加emoji。` },
+              { role:'user', content: `请根据以下数据生成${periodName}（${summary.period}）：\n总支出：¥${summary.totalExpense.toFixed(2)}\n总收入：¥${summary.totalIncome.toFixed(2)}\n支出分类：${JSON.stringify(summary.expenseByCat)}\n收入分类：${JSON.stringify(summary.incomeByCat)}\n共${summary.count}笔记录\n\n请包含：1.总体概况 2.支出分类占比分析 3.省钱建议（3条）` }
+            ],
+            temperature: 0.7,
+            max_tokens: 600
+          })
+        });
+        const data = await res.json();
+        const content = data.choices?.[0]?.message?.content || '报告生成失败';
+
+        await db.reports.add({
+          type, period,
+          content: `<b>📊 ${periodName}（${summary.period}）</b><br><br>${content.replace(/\n/g, '<br>')}`,
+          createdAt: new Date()
+        });
+
+        this.aiMessages.push({
+          role:'assistant',
+          content: `<b>🔔 自动生成${periodName}</b><br><br>${content.replace(/\n/g, '<br>')}`,
+          reportType: type
+        });
+        this.$nextTick(() => this.scrollAiChat());
+      } catch (e) {
+        console.error('generateAndSaveReport error:', e);
+      } finally {
+        this.generatingReport = false;
+      }
+    },
+
+    async checkAndGenerateReports() {
+      if (this.generatingReport) return;
+      const today = new Date();
+      const dayOfWeek = today.getDay();
+
+      // Weekly: 周一(1)及之后检查上周
+      if (dayOfWeek >= 1) {
+        const lastMonday = new Date(today);
+        lastMonday.setDate(today.getDate() - dayOfWeek - 6);
+        const weekPeriod = this.getWeekPeriod(lastMonday);
+        const exists = await db.reports.where({ type: 'weekly', period: weekPeriod }).first();
+        if (!exists) await this.generateAndSaveReport('weekly', weekPeriod);
+      }
+
+      // Monthly: 每月1号及之后检查上月
+      if (today.getDate() >= 1) {
+        const lastMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+        const monthPeriod = `${lastMonth.getFullYear()}-${String(lastMonth.getMonth()+1).padStart(2,'0')}`;
+        const exists = await db.reports.where({ type: 'monthly', period: monthPeriod }).first();
+        if (!exists) await this.generateAndSaveReport('monthly', monthPeriod);
+      }
+    },
+
+    async loadReports() {
+      this.reports = await db.reports.orderBy('createdAt').reverse().toArray();
+    },
+
     // ==================== EDIT MODAL ====================
     openEditModal(t) {
       this.editModal = {
@@ -1220,7 +1366,8 @@ const app = createApp({
     async exportData() {
       const transactions = await db.transactions.toArray();
       const categories = await db.categories.toArray();
-      const json = JSON.stringify({ transactions, categories }, null, 2);
+      const reports = await db.reports.toArray();
+      const json = JSON.stringify({ transactions, categories, reports }, null, 2);
       const blob = new Blob([json], { type:'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -1245,20 +1392,22 @@ const app = createApp({
         });
         const data = JSON.parse(text);
 
-        // Support both old format (array) and new format ({transactions, categories})
-        let transactions, categories;
+        // Support both old format (array) and new format ({transactions, categories, reports})
+        let transactions, categories, reports;
         if (Array.isArray(data)) {
           transactions = data;
           categories = null;
+          reports = null;
         } else {
           transactions = data.transactions;
           categories = data.categories;
+          reports = data.reports;
         }
 
         if (!Array.isArray(transactions)) throw new Error('文件格式错误');
 
-        const count = transactions.length + (categories ? categories.length : 0);
-        if (!confirm(`即将导入 ${transactions.length} 条记录${categories ? '和 ' + categories.length + ' 个分类' : ''}。\n选择"确定"替换所有数据，选择"取消"放弃导入。`)) return;
+        const count = transactions.length + (categories ? categories.length : 0) + (reports ? reports.length : 0);
+        if (!confirm(`即将导入 ${transactions.length} 条记录${categories ? '和 ' + categories.length + ' 个分类' : ''}${reports ? '和 ' + reports.length + ' 份报告' : ''}。\n选择"确定"替换所有数据，选择"取消"放弃导入。`)) return;
 
         await db.transactions.clear();
         for (const item of transactions) {
@@ -1285,8 +1434,21 @@ const app = createApp({
           }
         }
 
+        if (reports && reports.length > 0) {
+          await db.reports.clear();
+          for (const r of reports) {
+            await db.reports.add({
+              type: r.type,
+              period: r.period,
+              content: r.content,
+              createdAt: new Date(r.createdAt || Date.now())
+            });
+          }
+        }
+
         await this.loadCategories();
-        this.restoreMsg = `✅ 成功恢复 ${transactions.length} 条记录${categories ? '和 ' + categories.length + ' 个分类' : ''}`;
+        await this.loadReports();
+        this.restoreMsg = `✅ 成功恢复 ${transactions.length} 条记录${categories ? '和 ' + categories.length + ' 个分类' : ''}${reports ? '和 ' + reports.length + ' 份报告' : ''}`;
         this.restoreSuccess = true;
         this.loadDashboard();
         this.loadTransactions();
@@ -1315,6 +1477,8 @@ const app = createApp({
       await this.loadCategories();
       await this.loadDashboard();
       await this.loadTransactions();
+      await this.loadReports();
+      this.checkAndGenerateReports();
     } catch (e) {
       console.error('Init error:', e);
       document.getElementById('app-loading')?.classList.add('hidden');
