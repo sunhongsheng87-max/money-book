@@ -636,7 +636,13 @@ db.version(2).stores({
   transactions: '++id, type, category, date, amount, note, tags, createdAt'
 });
 db.version(3).stores({
-  reports: '++id, type, period',
+  reports: '++id, type, period, createdAt',
+  categories: '++id, type',
+  transactions: '++id, type, category, date, amount, note, tags, createdAt'
+});
+// fallback: ensure reports table exists even if v3 upgrade partially failed
+db.version(4).stores({
+  reports: '++id, type, period, createdAt',
   categories: '++id, type',
   transactions: '++id, type, category, date, amount, note, tags, createdAt'
 });
