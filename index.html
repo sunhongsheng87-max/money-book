@@ -354,8 +354,9 @@
       </div>
 
       <!-- Report History -->
-      <div v-if="reports.length>0" class="bg-white dark:bg-gray-800 rounded-xl p-3 shadow-sm space-y-2">
+      <div class="bg-white dark:bg-gray-800 rounded-xl p-3 shadow-sm space-y-2">
         <h3 class="text-sm font-semibold">📋 历史报告</h3>
+        <p v-if="reports.length===0" class="text-xs text-gray-400">暂无报告，可以手动生成或等周一自动生成周报</p>
         <div v-for="r in reports" :key="r.id" class="border border-gray-100 dark:border-gray-700 rounded-lg">
           <button @click="reportExpandedId = reportExpandedId===r.id ? null : r.id"
             class="w-full flex items-center justify-between px-3 py-2 text-left">
@@ -1163,6 +1164,24 @@ const app = createApp({
           content: `<b>📊 ${periodName}（${summary.period}）</b><br><br>${content.replace(/\n/g, '<br>')}`,
           reportType: type
         });
+
+        // Also save to reports table
+        const dbType = type === 'week' ? 'weekly' : 'monthly';
+        let dbPeriod;
+        if (type === 'week') {
+          dbPeriod = this.getWeekPeriod(startDate);
+        } else {
+          dbPeriod = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+        }
+        const existing = await db.reports.where({ type: dbType, period: dbPeriod }).first();
+        if (!existing) {
+          await db.reports.add({
+            type: dbType, period: dbPeriod,
+            content: `<b>📊 ${periodName}（${summary.period}）</b><br><br>${content.replace(/\n/g, '<br>')}`,
+            createdAt: new Date()
+          });
+          this.loadReports();
+        }
       } catch (e) {
         this.aiMessages.push({ role:'assistant', content: '生成失败：' + (e.message||'未知错误') });
       } finally {
@@ -1251,6 +1270,7 @@ const app = createApp({
           content: `<b>📊 ${periodName}（${summary.period}）</b><br><br>${content.replace(/\n/g, '<br>')}`,
           createdAt: new Date()
         });
+        this.loadReports();
 
         this.aiMessages.push({
           role:'assistant',
