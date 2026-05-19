@@ -947,6 +947,8 @@ const app = createApp({
 
       const expenseCats = this.categories.filter(c => c.type === 'expense').map(c => c.label).join('、');
       const incomeCats = this.categories.filter(c => c.type === 'income').map(c => c.label).join('、');
+      const inputText = this.aiInput;
+      this.aiInput = '';
 
       try {
         const res = await fetch('https://api.deepseek.com/v1/chat/completions', {
@@ -955,27 +957,48 @@ const app = createApp({
           body: JSON.stringify({
             model: 'deepseek-chat',
             messages: [
-              { role:'system', content:`你是一个记账助手。今天的日期是${new Date().toISOString().slice(0,10)}。从用户输入中提取：金额、类型(expense/income)、分类、备注、日期。如果用户没有指定日期，使用今天的日期。\n分类选项 - 支出：${expenseCats}；收入：${incomeCats}。\n返回纯JSON，不要包含markdown格式：{"amount":数字,"type":"expense或income","category":"分类","note":"备注","date":"YYYY-MM-DD"}\n如果无法识别，返回{"error":"无法识别"}` },
-              { role:'user', content: this.aiInput }
+              { role:'system', content:`你是一个记账助手。今天的日期是${new Date().toISOString().slice(0,10)}。从用户输入中提取所有账单，返回JSON数组。每项包含：amount(数字), type(expense/income), category(分类), note(备注), date(YYYY-MM-DD)。如果用户没有指定日期，使用今天的日期。\n分类选项 - 支出：${expenseCats}；收入：${incomeCats}。\n返回纯JSON数组，不要包含markdown：[{"amount":35,"type":"expense","category":"餐饮","note":"午饭","date":"2026-05-19"}, ...]\n如果输入只有一笔，也返回数组格式。如果无法识别，返回{"error":"原因"}` },
+              { role:'user', content: inputText }
             ],
             temperature: 0.1,
-            max_tokens: 200
+            max_tokens: 400
           })
         });
         const data = await res.json();
         const content = data.choices?.[0]?.message?.content || '';
-        const json = JSON.parse(content.replace(/```json|```/g, '').trim());
+        const parsed = JSON.parse(content.replace(/```json|```/g, '').trim());
 
-        if (json.error) { this.aiError = json.error; return; }
+        if (parsed.error) { this.aiError = parsed.error; return; }
 
+        const items = Array.isArray(parsed) ? parsed : [parsed];
         const today = new Date().toISOString().slice(0,10);
-        this.form.type = json.type || 'expense';
-        this.form.amount = json.amount || 0;
-        this.form.category = json.category || (this.categories.filter(c => c.type === (json.type||'expense'))[0]?.value || '');
-        this.form.note = json.note || '';
-        // Always use today for quick-add; user can manually change if needed
-        this.form.date = today;
-        this.form.tags = '';
+
+        if (items.length === 1) {
+          // Single transaction: fill form for user review
+          const json = items[0];
+          this.form.type = json.type || 'expense';
+          this.form.amount = json.amount || 0;
+          this.form.category = json.category || (this.categories.filter(c => c.type === (json.type||'expense'))[0]?.value || '');
+          this.form.note = json.note || '';
+          this.form.date = today;
+          this.form.tags = '';
+        } else {
+          // Multiple transactions: add all directly
+          for (const json of items) {
+            await db.transactions.add({
+              type: json.type || 'expense',
+              amount: json.amount || 0,
+              category: json.category || (this.categories.filter(c => c.type === (json.type||'expense'))[0]?.value || ''),
+              date: today,
+              note: json.note || (json.category || ''),
+              tags: '',
+              createdAt: new Date()
+            });
+          }
+          this.aiError = '';
+          alert(`✅ 已添加 ${items.length} 笔记录`);
+          this.loadDashboard();
+        }
       } catch (e) {
         this.aiError = '识别失败：' + (e.message || '请检查网络和API密钥');
       } finally {
